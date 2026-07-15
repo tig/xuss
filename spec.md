@@ -53,7 +53,7 @@ One square-wave engine, routable to two sinks.
 
 ## 5. Manners
 
-- Boot: identity line first (`fw_name=XUSS fw_version=…`), then one greeting chirp, then silence until spoken to.
+- Boot: identity line first (`fw_name=XUSS fw_version=…`), then the greeting, then silence until spoken to. **The greeting is seconds 8 to 10 of *First*** (`assets/boot-riff.u8.raw`, 11,025 Hz u8 mono, played via the DAC). It is the only sampled sound Xuss makes; it greets in its maker's voice, then sings in its own.
 - `mute` is **commissioning state**: it survives `defaults` and clears only by explicit `set mute 0`.
 - Every actuation that touches a DUT announces itself on the link before it moves.
 
@@ -88,7 +88,7 @@ Config persists as a single versioned, checksummed image; a torn image falls bac
 
 | Row | Check | Layer |
 |---|---|---|
-| Boot riff | Two seconds or less from power to greeting; identity line first | L1 |
+| Boot riff | Greeting begins within two seconds of power; identity line first; the riff is recognizably *First* at 8 seconds in, by ear on camera | L1 |
 | On-pitch | `rpm 1600`: measured voice frequency = 1600 × 130 / 60 Hz within 1%, logic-analyzer trace on screen | L1 |
 | Same engine | `route both`: speaker and tach pin identical within 0.1% | L1 |
 | Knob | `knob 1`: pitch tracks the ANGLE unit within one tick; a human revs the engine by hand | L1 |
