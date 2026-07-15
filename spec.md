@@ -1,6 +1,6 @@
-# Xuss — Software Specification (draft)
+# Xuss Software Specification (draft)
 
-**Rev 0.1 — July 2026**
+**Rev 0.1, July 2026**
 
 Xuss is a bench drone with two jobs. The day job: a test instrument that generates engine-speed edge trains, forces inputs, and measures current for sibling GCUs on the bench. The stage job: proof on camera that a spec plus silico produces a working device in about an hour. The trick that keeps the demo honest is that the voice *is* the instrument output: an engine-speed edge train is an audible square wave, and when Xuss sings it is demonstrably on-pitch per this spec's own edge-generator section.
 
@@ -10,9 +10,9 @@ This is a **requirements** document. It states outcomes, interfaces, and accepta
 
 | Layer | Proven when |
 |---|---|
-| **L0 — Host** | Song/choreography compiler, edge math, protocol, and config store pass pytest against the HAL double. |
-| **L1 — Metal (self)** | Edge output frequency verified by external measurement (logic analyzer); pitch within tolerance on the speaker; escape hatch works; identity on the link. |
-| **L2 — Fixture** | Xuss, as the bench fixture, runs a sibling GCU's metal gate end to end. Its vehicle is the bench. |
+| **L0 (host)** | Song/choreography compiler, edge math, protocol, and config store pass pytest against the HAL double. |
+| **L1 (metal, self)** | Edge output frequency verified by external measurement (logic analyzer); pitch within tolerance on the speaker; escape hatch works; identity on the link. |
+| **L2 (fixture)** | Xuss, as the bench fixture, runs a sibling GCU's metal gate end to end. Its vehicle is the bench. |
 
 Claims name their layer. Host green is never fixture done.
 
@@ -100,7 +100,7 @@ Config persists as a single versioned, checksummed image; a torn image falls bac
 
 ## 9. The build (for the agent that gets pointed here)
 
-Silico is the harness (https://github.com/tig/silico — read its AGENTS.md; the pip distribution is `tig-silico`). Work spec-first: this document is the contract; do not edit it, and carry an ambiguity log in the PR for every place it made you guess. The gates are `pytest -q`, `silico gate`, and `silico product-path`, and all three are part of done.
+Silico is the harness: https://github.com/tig/silico. Read its AGENTS.md; the pip distribution is `tig-silico`. Work spec-first: this document is the contract; do not edit it, and carry an ambiguity log in the PR for every place it made you guess. The gates are `pytest -q`, `silico gate`, and `silico product-path`, and all three are part of done.
 
 ## 10. Open items
 

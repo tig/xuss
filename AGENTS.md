@@ -13,4 +13,4 @@ A GCU (one shippable edge device) built on the [silico](https://github.com/tig/s
 3. The gates are `pytest -q`, `silico gate`, and `silico product-path`. All three are part of done.
 4. Ground in part truth before writing hardware-facing code: `silico parts --fetch` pulls local copies of the pointers in `parts.toml`. Never commit fetched documents.
 5. Hardware honesty: claim readiness per spec §1. Self-report is not measurement (§6 rail 4).
-6. First flash on this board is esptool (ESP32); afterward, mpremote like every GCU. The escape hatch (`repl`/`reboot`) is required from day one — a build without the door fails L1.
+6. First flash on this board is esptool (ESP32); afterward, mpremote like every GCU. The escape hatch (`repl`/`reboot`) is required from day one; a build without the door fails L1.
