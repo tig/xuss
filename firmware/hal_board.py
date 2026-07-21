@@ -4,8 +4,9 @@ Listed in silico.toml ``[hal].allow_machine``. Host tests never import this
 module; they inject ``sim.hal_double.FakeHal`` (or a plant) into ``main.init``.
 """
 
-from __future__ import annotations
-
+# No ``from __future__ import annotations`` — MicroPython has no __future__
+# (tig/silico#46). Keep deploy-set modules MP-safe.
+#
 # Pin comes from the shipped defaults, not a literal here. Two copies of a
 # shipped value are two values: they drift, and the gate cannot tell which one
 # the product runs.
@@ -21,13 +22,13 @@ def make_board_hal():
     pin.value(1)  # off when active-low
 
     class BoardHal:
-        def set_led(self, on: bool) -> None:
+        def set_led(self, on):
             pin.value(0 if on else 1)
 
-        def ticks_ms(self) -> int:
+        def ticks_ms(self):
             return int(time.ticks_ms())
 
-        def sleep_ms(self, ms: int) -> None:
+        def sleep_ms(self, ms):
             time.sleep_ms(int(ms))
 
     return BoardHal()
