@@ -79,6 +79,9 @@ PIR_PIN = 17  # Port C yellow — PIR unit digital
 BOOT_RIFF_ENABLE = 1
 BOOT_RIFF_PATH = "boot_riff.u8.raw"
 BOOT_RIFF_HZ = 11025
+# Software ease-out on top of the asset's own fade (ms of tail → mid 128)
+BOOT_RIFF_FADE_MS = 400
+BOOT_RIFF_HOLD_MID_MS = 50
 # Host path relative to repo root for tests
 BOOT_RIFF_HOST = "assets/boot-riff.u8.raw"
 

@@ -9,6 +9,8 @@ voice; 1-10 play a clean mark-space square (default 50%).
 
 from defaults import (
     ANGLE_ADC_PIN,
+    BOOT_RIFF_FADE_MS,
+    BOOT_RIFF_HOLD_MID_MS,
     BOOT_RIFF_HZ,
     FACE_BG_COLOR,
     FACE_DRIVE_COLOR,
@@ -442,10 +444,14 @@ def make_board_hal():
             if dac is None:
                 return
             # 11,025 Hz => ~90.7 us/sample. Prefer slightly long over short (less harsh).
-            period = max(1, (1000000 + int(BOOT_RIFF_HZ) // 2) // int(BOOT_RIFF_HZ))
+            hz = int(BOOT_RIFF_HZ)
+            period = max(1, (1000000 + hz // 2) // hz)
             n = len(data)
-            # Soft fade to mid (u8 silence = 128), not hard zero (that clicks/distorts)
-            fade_n = min(n, max(1, int(BOOT_RIFF_HZ) // 20))  # ~50 ms
+            # Long ease-out to mid (u8 silence = 128). Linear then squared so the
+            # last half of the fade is much quieter (less cliff into mute).
+            fade_ms = int(BOOT_RIFF_FADE_MS) if BOOT_RIFF_FADE_MS else 400
+            fade_n = min(n, max(1, (hz * fade_ms) // 1000))
+            hold_ms = int(BOOT_RIFF_HOLD_MID_MS) if BOOT_RIFF_HOLD_MID_MS else 50
             try:
                 for _ in range(16):
                     dac.write(128)
@@ -457,24 +463,32 @@ def make_board_hal():
                     else:
                         v = int(b) & 0xFF
                     if i >= n - fade_n:
-                        remain = n - i
-                        # blend toward 128
-                        v = 128 + ((v - 128) * remain) // fade_n
+                        # progress 0 at fade start → fade_n at end
+                        step = i - (n - fade_n) + 1  # 1..fade_n
+                        # remain_frac = 1 - (step/fade_n); ease with remain^2
+                        remain = fade_n - step + 1  # fade_n..1
+                        # scale = (remain/fade_n)^2
+                        scale = (remain * remain) // fade_n  # fade_n..~0
+                        v = 128 + ((v - 128) * scale) // fade_n
                     if v < 0:
                         v = 0
                     if v > 255:
                         v = 255
                     dac.write(v)
                     t_next = time.ticks_add(t_next, period)
-                    # Busy-wait until due; if late, resync (avoid spiral of death)
                     while True:
                         d = time.ticks_diff(t_next, time.ticks_us())
                         if d <= 0:
                             if d < -period * 4:
                                 t_next = time.ticks_us()
                             break
-                dac.write(128)
-                time.sleep_ms(8)
+                # Park at mid on the DAC before unmux — avoids a rail slap
+                for _ in range(max(1, (hz * hold_ms) // 1000)):
+                    dac.write(128)
+                    t_next = time.ticks_add(t_next, period)
+                    while time.ticks_diff(t_next, time.ticks_us()) > 0:
+                        pass
+                time.sleep_ms(hold_ms)
             except Exception:
                 pass
             _spk_off()
