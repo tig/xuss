@@ -6,7 +6,7 @@ fw_version = "0.0.1"
 [runtime]
 # Latest *stable* PyPI mpy-cross at plate ship time. After silico inspect,
 # re-pin to the device MicroPython major.minor (see AGENTS.md mpy-cross notes).
-mpy_cross = "1.27.0.post2"
+mpy_cross = "1.28.0rc0.post2"
 # M5Stack M5GO IoT Starter Kit v2.7 (ESP32). First flash: esptool; deploy: mpremote.
 board = "m5go-esp32"
 
