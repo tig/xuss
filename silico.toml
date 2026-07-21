@@ -1,7 +1,7 @@
 [product]
 name = "Xuss"
 fw_name = "XUSS"
-fw_version = "0.3.4"
+fw_version = "0.3.5"
 
 [runtime]
 mpy_cross = "1.28.0rc0.post2"

@@ -376,7 +376,13 @@ def make_board_hal():
             else:
                 lcd.fill_rect(70, 110, 70, 10, eye)
                 lcd.fill_rect(180, 110, 70, 10, eye)
-            lcd.fill_rect(110, 180, 100, 8, (0, 60, 80))
+            # Smile: simple upward arc from filled bars (readable on camera)
+            mouth = eye if mode != "idle" else (0, 160, 180)
+            # corners up, center lower = smile
+            lcd.fill_rect(100, 175, 18, 10, mouth)
+            lcd.fill_rect(202, 175, 18, 10, mouth)
+            lcd.fill_rect(115, 185, 90, 10, mouth)
+            lcd.fill_rect(125, 195, 70, 8, mouth)
 
         def set_backlight(self, on: bool) -> None:
             bl.value(1 if on else 0)
