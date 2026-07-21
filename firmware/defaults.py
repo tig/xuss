@@ -75,7 +75,8 @@ TACH_PIN = 26  # Port B yellow
 ANGLE_ADC_PIN = 36  # Port B white (ADC) — ANGLE unit
 PIR_PIN = 17  # Port C yellow — PIR unit digital
 
-# Boot riff (spec §5)
+# Boot riff (spec §5). 0 until amp path is proven quiet (re-enable with set later / rebuild).
+BOOT_RIFF_ENABLE = 0
 BOOT_RIFF_PATH = "boot_riff.u8.raw"
 BOOT_RIFF_HZ = 11025
 # Host path relative to repo root for tests

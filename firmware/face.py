@@ -32,23 +32,27 @@ def _mode_color(mode):
     return FACE_EYE_COLOR
 
 
-def eyes_open(t_ms):
-    """Blink closed for FACE_BLINK_MS at the end of each FACE_BLINK_PERIOD_MS."""
+def eyes_open(t_ms, mode="idle"):
+    """Blink only when active (singing/driving). Idle stays open — avoids full LCD redraw thrash."""
+    if mode == "idle" or mode == "fault":
+        return True
     phase = int(t_ms) % int(FACE_BLINK_PERIOD_MS)
     close_at = int(FACE_BLINK_PERIOD_MS) - int(FACE_BLINK_MS)
     return phase < close_at
 
 
 def side_colors(t_ms, mode="idle"):
-    """Ten RGB tuples for the side strip. Chase carries the beat."""
+    """Side strip. Idle is static (no chase) — continuous SK6812 bit-bang couples into the amp."""
     n = int(SIDE_LED_COUNT)
     base = _mode_color(mode)
     if mode == "fault":
         return [(40, 0, 0)] * n
     dim = _scale(base, int(FACE_IDLE_DIM))
+    if mode == "idle":
+        # static glow — one write at mode entry, not every 120ms
+        return [dim] * n
     bright = _scale(base, int(FACE_CHASE_BRIGHT))
     idx = (int(t_ms) // int(FACE_CHASE_MS)) % n
-    # singing: faster feel via dual highlights
     colors = [dim] * n
     colors[idx] = bright
     colors[(idx - 1) % n] = _scale(base, int(FACE_CHASE_BRIGHT) // 3)
@@ -58,11 +62,10 @@ def side_colors(t_ms, mode="idle"):
 
 
 def frame(t_ms, mode="idle", identity="XUSS"):
-    """Full face frame for HAL show_face / set_side_leds."""
     return {
         "mode": mode,
         "identity": identity,
-        "eyes_open": eyes_open(t_ms) if mode != "fault" else True,
+        "eyes_open": eyes_open(t_ms, mode=mode),
         "side": side_colors(t_ms, mode=mode),
         "t_ms": int(t_ms),
     }

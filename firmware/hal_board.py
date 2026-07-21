@@ -129,10 +129,28 @@ def _pwm_duty_u16(duty_pct):
     return (p * 65535) // 100
 
 
+def emergency_silence():
+    """Last-ditch: G25/G26 low. Safe without a HAL instance."""
+    from machine import PWM, Pin  # type: ignore
+
+    for n in (SPEAKER_PIN, TACH_PIN):
+        try:
+            PWM(Pin(n)).deinit()
+        except Exception:
+            pass
+        try:
+            Pin(n, Pin.OUT).value(0)
+        except Exception:
+            pass
+
+
 def make_board_hal():
     from machine import PWM, Pin, SPI  # type: ignore
     import neopixel  # type: ignore
     import time
+
+    # Absolute silence before any peripheral brings the amp up
+    emergency_silence()
 
     try:
         led_pin = Pin(SIDE_LED_PIN, Pin.OPEN_DRAIN)
@@ -327,7 +345,8 @@ def make_board_hal():
                 return
             open_eyes = bool(frame.get("eyes_open", True))
             mode = frame.get("mode", "idle")
-            key = (open_eyes, mode)
+            # Idle: draw once per mode only (never full-screen thrash / brownout loop)
+            key = (mode, open_eyes if mode != "idle" else True)
             if key == _last_face_key[0]:
                 return
             _last_face_key[0] = key
@@ -346,6 +365,7 @@ def make_board_hal():
                 eye = FACE_EYE_COLOR
                 bar = (0, 80, 100)
 
+            # Avoid full-frame fill when possible — only clear once per mode change
             lcd.fill(bg)
             lcd.fill_rect(0, 0, LCD_WIDTH, 28, bar)
             if open_eyes:

@@ -61,8 +61,14 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
     _emit(state, identity_line())
     state["identity_sent"] = True
     _paint(state, now_ms)
-    # One-shot boot riff, then hard silence
-    if riff_data:
+    # One-shot boot riff, then hard silence (optional; can couple noise if amp is hot)
+    try:
+        from defaults import BOOT_RIFF_ENABLE
+
+        riff_on = int(BOOT_RIFF_ENABLE) != 0
+    except Exception:
+        riff_on = True
+    if riff_on and riff_data:
         if hasattr(hal, "write_dac_samples"):
             try:
                 hal.write_dac_samples(riff_data)
@@ -73,8 +79,8 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
                 hal.dac_idle()
             except Exception:
                 pass
-        if hasattr(hal, "park_outputs"):
-            hal.park_outputs()
+    if hasattr(hal, "park_outputs"):
+        hal.park_outputs()
     return state
 
 
@@ -136,6 +142,7 @@ def _paint(state, now_ms=None):
     if elapsed < 0:
         elapsed = 0
     mode = face_mode(state["eng"], state["cfg"])
+    prev_mode = state.get("mode")
     state["mode"] = mode
     identity = "%s %s" % (state["fw_name"], state["fw_version"])
     fr = face_frame(elapsed, mode=mode, identity=identity)
@@ -144,14 +151,25 @@ def _paint(state, now_ms=None):
     hal = state.get("hal")
     if hal is None:
         return fr
-    # Only push LEDs when the frame changes (avoids continuous SK6812 traffic)
+
+    # Idle: paint once. Active modes: allow chase (throttled by face.side changes).
+    if mode == "idle" and prev_mode == "idle" and state.get("_idle_painted"):
+        return fr
+
     prev = state.get("_side_key")
-    side_key = (mode, fr.get("eyes_open"), fr["side"][0] if fr.get("side") else None)
+    if mode == "idle":
+        side_key = ("idle",)
+    else:
+        side_key = (mode, fr.get("eyes_open"), fr["side"][0] if fr.get("side") else None)
     if prev != side_key and hasattr(hal, "set_side_leds"):
         hal.set_side_leds(fr["side"])
         state["_side_key"] = side_key
     if hasattr(hal, "show_face"):
         hal.show_face(fr)
+    if mode == "idle":
+        state["_idle_painted"] = True
+    else:
+        state["_idle_painted"] = False
     return fr
 
 
@@ -319,52 +337,64 @@ def feed_line(state, line, now_ms=None):
 
 
 def main():
-    from defaults import BOOT_RIFF_PATH
     from hal_board import make_board_hal
 
-    # Ensure riff file name alias if only host name present
     try:
-        import uos as os  # type: ignore
-    except ImportError:
-        import os  # type: ignore
-    try:
-        if BOOT_RIFF_PATH not in os.listdir() and "boot-riff.u8.raw" in os.listdir():
-            # no rename required if we open both in loader
+        hal = make_board_hal()
+        # Immediate hard silence before anything else
+        if hasattr(hal, "park_outputs"):
+            hal.park_outputs()
+        link = make_stdio_link()
+        t0 = hal.ticks_ms() if hasattr(hal, "ticks_ms") else 0
+        state = init(hal=hal, now_ms=t0, link=link)
+        if hasattr(hal, "park_outputs"):
+            hal.park_outputs()
+
+        while True:
+            if state.get("exit_repl"):
+                _park(state)
+                try:
+                    import micropython
+
+                    micropython.kbd_intr(3)
+                except Exception:
+                    pass
+                break
+            if state.get("do_reboot"):
+                _park(state)
+                if hasattr(hal, "reboot"):
+                    hal.reboot()
+                break
+            try:
+                tick(state)
+            except Exception as exc:
+                try:
+                    print("event=err %s" % exc)
+                except Exception:
+                    pass
+                _park(state)
+            sleep_ms = state.get("tick_sleep_ms", TICK_SLEEP_MS)
+            if hasattr(hal, "sleep_ms"):
+                hal.sleep_ms(sleep_ms)
+            else:
+                try:
+                    import time
+
+                    time.sleep(sleep_ms / 1000.0)
+                except ImportError:
+                    pass
+    except Exception as exc:
+        try:
+            print("event=fatal %s" % exc)
+        except Exception:
             pass
-    except Exception:
-        pass
+        # last-ditch silence via board HAL only (no machine in main)
+        try:
+            from hal_board import emergency_silence
 
-    hal = make_board_hal()
-    link = make_stdio_link()
-    t0 = hal.ticks_ms() if hasattr(hal, "ticks_ms") else 0
-    state = init(hal=hal, now_ms=t0, link=link)
-
-    while True:
-        if state.get("exit_repl"):
-            _park(state)
-            try:
-                import micropython
-
-                micropython.kbd_intr(3)
-            except Exception:
-                pass
-            break
-        if state.get("do_reboot"):
-            _park(state)
-            if hasattr(hal, "reboot"):
-                hal.reboot()
-            break
-        tick(state)
-        sleep_ms = state.get("tick_sleep_ms", TICK_SLEEP_MS)
-        if hasattr(hal, "sleep_ms"):
-            hal.sleep_ms(sleep_ms)
-        else:
-            try:
-                import time
-
-                time.sleep(sleep_ms / 1000.0)
-            except ImportError:
-                pass
+            emergency_silence()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
