@@ -434,31 +434,49 @@ def make_board_hal():
             machine.reset()
 
         def write_dac_samples(self, data) -> None:
+            """Play u8 mono PCM. Busy-wait on ticks_us (sleep_us is too jittery)."""
             if not data:
                 return
             _spk_to_dac()
             dac = spk_dac[0]
             if dac is None:
                 return
-            # ~11025 Hz: ~90 us/sample
-            us = max(1, int(1000000 // int(BOOT_RIFF_HZ)))
+            # 11,025 Hz => ~90.7 us/sample. Prefer slightly long over short (less harsh).
+            period = max(1, (1000000 + int(BOOT_RIFF_HZ) // 2) // int(BOOT_RIFF_HZ))
             n = len(data)
-            # Last ~15 ms force to 0 so amp is not left mid-rail when we stop
-            fade_n = min(n, int(BOOT_RIFF_HZ * 15 // 1000))
-            for i, b in enumerate(data):
-                try:
-                    if i >= n - fade_n:
-                        dac.write(0)
-                    else:
-                        dac.write(int(b) & 0xFF)
-                except Exception:
-                    break
-                time.sleep_us(us)
+            # Soft fade to mid (u8 silence = 128), not hard zero (that clicks/distorts)
+            fade_n = min(n, max(1, int(BOOT_RIFF_HZ) // 20))  # ~50 ms
             try:
-                dac.write(0)
+                for _ in range(16):
+                    dac.write(128)
+                t_next = time.ticks_us()
+                for i in range(n):
+                    b = data[i]
+                    if isinstance(b, str):
+                        v = ord(b)
+                    else:
+                        v = int(b) & 0xFF
+                    if i >= n - fade_n:
+                        remain = n - i
+                        # blend toward 128
+                        v = 128 + ((v - 128) * remain) // fade_n
+                    if v < 0:
+                        v = 0
+                    if v > 255:
+                        v = 255
+                    dac.write(v)
+                    t_next = time.ticks_add(t_next, period)
+                    # Busy-wait until due; if late, resync (avoid spiral of death)
+                    while True:
+                        d = time.ticks_diff(t_next, time.ticks_us())
+                        if d <= 0:
+                            if d < -period * 4:
+                                t_next = time.ticks_us()
+                            break
+                dac.write(128)
+                time.sleep_ms(8)
             except Exception:
                 pass
-            # Always hard-mute after a buffer (caller may also park)
             _spk_off()
 
         def dac_idle(self) -> None:
