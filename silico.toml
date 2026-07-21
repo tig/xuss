@@ -1,7 +1,7 @@
 [product]
 name = "Xuss"
 fw_name = "XUSS"
-fw_version = "0.1.0"
+fw_version = "0.2.0"
 
 [runtime]
 # mpy-cross ABI: Silico owns the pin. Applied from device MicroPython after
@@ -27,6 +27,9 @@ core = [
   "firmware/defaults.py",
   "firmware/edge.py",
   "firmware/config.py",
+  "firmware/engine.py",
+  "firmware/link.py",
+  "firmware/protocol.py",
   "firmware/face.py",
   "firmware/hal.py",
   "firmware/hal_board.py",

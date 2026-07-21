@@ -5,8 +5,10 @@ from defaults import (
     FACE_BLINK_PERIOD_MS,
     FACE_CHASE_BRIGHT,
     FACE_CHASE_MS,
+    FACE_DRIVE_COLOR,
     FACE_EYE_COLOR,
     FACE_IDLE_DIM,
+    FACE_SING_COLOR,
     SIDE_LED_COUNT,
 )
 
@@ -20,6 +22,16 @@ def _scale(rgb, level):
     )
 
 
+def _mode_color(mode):
+    if mode == "singing":
+        return FACE_SING_COLOR
+    if mode == "driving":
+        return FACE_DRIVE_COLOR
+    if mode == "fault":
+        return (255, 40, 40)
+    return FACE_EYE_COLOR
+
+
 def eyes_open(t_ms):
     """Blink closed for FACE_BLINK_MS at the end of each FACE_BLINK_PERIOD_MS."""
     phase = int(t_ms) % int(FACE_BLINK_PERIOD_MS)
@@ -28,18 +40,20 @@ def eyes_open(t_ms):
 
 
 def side_colors(t_ms, mode="idle"):
-    """Ten RGB tuples for the side strip. Chase carries the idle beat."""
+    """Ten RGB tuples for the side strip. Chase carries the beat."""
     n = int(SIDE_LED_COUNT)
-    dim = _scale(FACE_EYE_COLOR, int(FACE_IDLE_DIM))
-    bright = _scale(FACE_EYE_COLOR, int(FACE_CHASE_BRIGHT))
-    idx = (int(t_ms) // int(FACE_CHASE_MS)) % n
+    base = _mode_color(mode)
     if mode == "fault":
-        # solid dim red
         return [(40, 0, 0)] * n
+    dim = _scale(base, int(FACE_IDLE_DIM))
+    bright = _scale(base, int(FACE_CHASE_BRIGHT))
+    idx = (int(t_ms) // int(FACE_CHASE_MS)) % n
+    # singing: faster feel via dual highlights
     colors = [dim] * n
     colors[idx] = bright
-    # trailing glow
-    colors[(idx - 1) % n] = _scale(FACE_EYE_COLOR, int(FACE_CHASE_BRIGHT) // 3)
+    colors[(idx - 1) % n] = _scale(base, int(FACE_CHASE_BRIGHT) // 3)
+    if mode in ("singing", "driving"):
+        colors[(idx + 5) % n] = _scale(base, int(FACE_CHASE_BRIGHT) // 2)
     return colors
 
 

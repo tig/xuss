@@ -1,11 +1,13 @@
 """Device HAL backend for M5GO — only deploy module allowed to import machine.
 
-Pin map: M5GO IoT Kit v2.7 docs (ILI9342C + SK6812x10 on G15).
+Pin map: M5GO IoT Kit v2.7 (ILI9342C, SK6812x10@G15, SPK@G25, Port B@G26).
 """
 
 from defaults import (
     FACE_BG_COLOR,
+    FACE_DRIVE_COLOR,
     FACE_EYE_COLOR,
+    FACE_SING_COLOR,
     LCD_BAUD,
     LCD_BL_PIN,
     LCD_CS_PIN,
@@ -18,6 +20,8 @@ from defaults import (
     LCD_WIDTH,
     SIDE_LED_COUNT,
     SIDE_LED_PIN,
+    SPEAKER_PIN,
+    TACH_PIN,
 )
 
 
@@ -26,8 +30,6 @@ def _rgb565(r, g, b):
 
 
 class _Ili9342:
-    """Minimal ILI9342C driver: init, fill, rects. Enough for the idle face."""
-
     def __init__(self, spi, cs, dc, rst, bl):
         self.spi = spi
         self.cs = cs
@@ -53,9 +55,9 @@ class _Ili9342:
         self._data(bytearray([b]))
 
     def reset(self):
-        self.rst.value(0)
         import time
 
+        self.rst.value(0)
         time.sleep_ms(20)
         self.rst.value(1)
         time.sleep_ms(120)
@@ -64,16 +66,15 @@ class _Ili9342:
         import time
 
         self.reset()
-        self._cmd(0x01)  # SWRESET
+        self._cmd(0x01)
         time.sleep_ms(150)
-        self._cmd(0x11)  # SLPOUT
+        self._cmd(0x11)
         time.sleep_ms(120)
-        self._cmd(0x3A)  # COLMOD
-        self._data_byte(0x55)  # 16-bit
-        # MADCTL: M5 Core landscape, BGR often needed on ILI9342
+        self._cmd(0x3A)
+        self._data_byte(0x55)
         self._cmd(0x36)
         self._data_byte(0x08)
-        self._cmd(0x29)  # DISPON
+        self._cmd(0x29)
         time.sleep_ms(20)
         self.bl.value(1)
 
@@ -97,7 +98,6 @@ class _Ili9342:
         hi = c >> 8
         lo = c & 0xFF
         row_w = x1 - x0 + 1
-        # chunk rows to keep allocations small on ESP32
         row = bytearray(row_w * 2)
         for i in range(row_w):
             row[i * 2] = hi
@@ -113,13 +113,21 @@ class _Ili9342:
         self.fill_rect(0, 0, self.width, self.height, color_rgb)
 
 
+def _pwm_duty_u16(duty_pct):
+    # 0-100% -> 0-65535
+    p = int(duty_pct)
+    if p < 0:
+        p = 0
+    if p > 100:
+        p = 100
+    return (p * 65535) // 100
+
+
 def make_board_hal():
-    """Construct the on-metal HAL. Imports machine only when called on device."""
-    from machine import Pin, SPI  # type: ignore
+    from machine import PWM, Pin, SPI  # type: ignore
     import neopixel  # type: ignore
     import time
 
-    # Side LEDs: SK6812 x10 on G15 (M5 recommends open-drain)
     try:
         led_pin = Pin(SIDE_LED_PIN, Pin.OPEN_DRAIN)
     except (AttributeError, TypeError, ValueError):
@@ -148,14 +156,42 @@ def make_board_hal():
         lcd.fill(FACE_BG_COLOR)
         lcd_ok = True
     except Exception:
-        # Still drive side LEDs if panel init fails
         lcd_ok = False
 
+    spk_pin = Pin(SPEAKER_PIN, Pin.OUT)
+    tach_pin = Pin(TACH_PIN, Pin.OUT)
+    spk_pwm = PWM(spk_pin, freq=1000, duty_u16=0)
+    tach_pwm = PWM(tach_pin, freq=1000, duty_u16=0)
+
     _last_face_key = [None]
+    _last_edge = [None]  # (hz, duty, route)
+
+    def _apply_pwm(pwm, hz, duty_pct):
+        if hz is None or hz <= 0:
+            try:
+                pwm.duty_u16(0)
+            except Exception:
+                pwm.duty(0)
+            return
+        ihz = int(hz)
+        if ihz < 1:
+            ihz = 1
+        try:
+            pwm.freq(ihz)
+        except ValueError:
+            # out of hardware range — park this sink
+            try:
+                pwm.duty_u16(0)
+            except Exception:
+                pwm.duty(0)
+            return
+        try:
+            pwm.duty_u16(_pwm_duty_u16(duty_pct))
+        except Exception:
+            pwm.duty(int(duty_pct * 1023 / 100))
 
     class BoardHal:
         def set_led(self, on: bool) -> None:
-            # Map legacy status to center pair of side LEDs when idle chase is off
             mid = int(SIDE_LED_COUNT) // 2
             if on:
                 np[mid] = FACE_EYE_COLOR
@@ -178,7 +214,6 @@ def make_board_hal():
         def show_face(self, frame) -> None:
             if not lcd_ok:
                 return
-            # Avoid full redraw every tick: key on eyes + mode + coarse time bucket
             open_eyes = bool(frame.get("eyes_open", True))
             mode = frame.get("mode", "idle")
             key = (open_eyes, mode)
@@ -187,28 +222,57 @@ def make_board_hal():
             _last_face_key[0] = key
 
             bg = FACE_BG_COLOR
-            eye = FACE_EYE_COLOR if mode != "fault" else (255, 40, 40)
+            if mode == "singing":
+                eye = FACE_SING_COLOR
+                bar = FACE_SING_COLOR
+            elif mode == "driving":
+                eye = FACE_DRIVE_COLOR
+                bar = FACE_DRIVE_COLOR
+            elif mode == "fault":
+                eye = (255, 40, 40)
+                bar = eye
+            else:
+                eye = FACE_EYE_COLOR
+                bar = (0, 80, 100)
+
             lcd.fill(bg)
-            # title bar
-            bar = (0, 80, 100) if mode == "idle" else eye
             lcd.fill_rect(0, 0, LCD_WIDTH, 28, bar)
-            # identity stripe (no font: solid block left + right "eyes" region)
             if open_eyes:
-                # left eye
                 lcd.fill_rect(70, 90, 70, 50, eye)
                 lcd.fill_rect(90, 105, 24, 24, bg)
-                # right eye
                 lcd.fill_rect(180, 90, 70, 50, eye)
                 lcd.fill_rect(200, 105, 24, 24, bg)
             else:
-                # closed lids
                 lcd.fill_rect(70, 110, 70, 10, eye)
                 lcd.fill_rect(180, 110, 70, 10, eye)
-            # mouth idle line
             lcd.fill_rect(110, 180, 100, 8, (0, 60, 80))
 
         def set_backlight(self, on: bool) -> None:
             bl.value(1 if on else 0)
+
+        def set_edge(self, hz, duty_pct, route) -> None:
+            key = (float(hz or 0), int(duty_pct), str(route))
+            if key == _last_edge[0]:
+                return
+            _last_edge[0] = key
+            hz = float(hz or 0)
+            duty = int(duty_pct)
+            r = str(route)
+            voice_on = r in ("voice", "both") and hz > 0
+            tach_on = r in ("tach", "both") and hz > 0
+            _apply_pwm(spk_pwm, hz if voice_on else 0, duty)
+            _apply_pwm(tach_pwm, hz if tach_on else 0, duty)
+
+        def park_outputs(self) -> None:
+            _last_edge[0] = (0.0, 0, "park")
+            _apply_pwm(spk_pwm, 0, 0)
+            _apply_pwm(tach_pwm, 0, 0)
+
+        def reboot(self) -> None:
+            self.park_outputs()
+            import machine  # type: ignore
+
+            machine.reset()
 
         def ticks_ms(self) -> int:
             return int(time.ticks_ms())

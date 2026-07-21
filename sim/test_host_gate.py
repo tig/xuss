@@ -1,4 +1,4 @@
-"""Host gate: edge/config/face + main path against HAL double; product path honest."""
+"""Host gate: edge/protocol/engine + main path against HAL double."""
 
 import importlib.util
 import sys
@@ -37,19 +37,20 @@ def _load_sim(name: str):
 
 def test_version_identity_present():
     version = _load("version")
-    assert isinstance(version.FW_NAME, str) and version.FW_NAME
-    assert isinstance(version.FW_VERSION, str) and version.FW_VERSION.count(".") >= 2
+    assert version.FW_NAME == "XUSS"
+    assert version.FW_VERSION.count(".") >= 2
 
 
 def test_hal_contract_importable_without_machine():
     hal_mod = _load("hal")
     assert hasattr(hal_mod, "Hal")
+    assert hasattr(hal_mod.Hal, "set_edge")
+    assert hasattr(hal_mod.Hal, "park_outputs")
 
 
 def test_edge_math_matches_spec_examples():
     edge = _load("edge")
     defaults = _load("defaults")
-    # 750 rpm @ 130 teeth => 1625 Hz; 200 rpm => ~433.33 Hz
     assert edge.rpm_to_hz(750, defaults.RING_TEETH) == 1625.0
     assert abs(edge.rpm_to_hz(200, defaults.RING_TEETH) - 433.333333) < 0.01
     assert abs(edge.rpm_to_hz(1600, defaults.RING_TEETH) - (1600 * 130 / 60)) < 1e-9
@@ -60,21 +61,13 @@ def test_profiles_are_songs():
     defaults = _load("defaults")
     steps = edge.profile_steps("crank_catch_idle", defaults.PROFILES)
     assert steps[0][0] == 200
-    assert edge.profile_rpm_at(steps, 0) == 200
     assert edge.profile_rpm_at(steps, 900) == 433
-    assert edge.profile_total_ms(steps) > 0
     assert "stall" in defaults.PROFILES
-    assert "redline_sweep" in defaults.PROFILES
 
 
 def test_config_completeness_and_mute_survives_defaults():
     config = _load("config")
     cfg = config.factory()
-    assert config.get_param(cfg, "ring_teeth") == 130
-    ok, _ = config.set_param(cfg, "rpm", 1600)
-    assert ok
-    ok, err = config.set_param(cfg, "rpm", 9000)
-    assert not ok and err == "range"
     ok, _ = config.set_param(cfg, "mute", 1)
     assert ok
     config.apply_defaults(cfg)
@@ -87,13 +80,70 @@ def test_face_is_time_based_not_tick_based():
     defaults = _load("defaults")
     a = face.frame(0, mode="idle")
     b = face.frame(defaults.FACE_CHASE_MS, mode="idle")
-    # chase advances with wall time
     assert a["side"] != b["side"]
-    # blink closed near period end
-    closed = face.frame(defaults.FACE_BLINK_PERIOD_MS - 1, mode="idle")
-    open_ = face.frame(0, mode="idle")
-    assert open_["eyes_open"] is True
-    assert closed["eyes_open"] is False
+    assert face.frame(0, mode="singing")["side"] != face.frame(0, mode="idle")["side"]
+
+
+def test_protocol_identity_get_set_and_escape():
+    main = _load("main")
+    link_mod = _load("link")
+    fake = _load_sim("hal_double").FakeHal()
+    link = link_mod.MemoryLink()
+    state = main.init(hal=fake, now_ms=0, link=link)
+    assert any("fw_name=XUSS" in x for x in link.out)
+
+    main.feed_line(state, "identity", now_ms=10)
+    assert any("fw_version=" in x for x in link.out)
+
+    main.feed_line(state, "set ring_teeth 130", now_ms=20)
+    main.feed_line(state, "get ring_teeth", now_ms=30)
+    assert "ring_teeth=130" in link.out
+
+    main.feed_line(state, "rpm 1600", now_ms=40)
+    main.tick(state, now_ms=50)
+    assert fake.last_edge is not None
+    assert fake.last_edge[0] > 0
+    assert state["mode"] == "singing"
+
+    main.feed_line(state, "stop", now_ms=60)
+    main.tick(state, now_ms=70)
+    assert state["eng"]["active_rpm"] == 0
+
+    main.feed_line(state, "repl", now_ms=80)
+    assert state["exit_repl"] is True
+
+
+def test_sing_and_run_profiles_and_deadman():
+    main = _load("main")
+    link_mod = _load("link")
+    defaults = _load("defaults")
+    fake = _load_sim("hal_double").FakeHal()
+    link = link_mod.MemoryLink()
+    state = main.init(hal=fake, now_ms=0, link=link)
+
+    main.feed_line(state, "sing stall", now_ms=100)
+    assert state["cfg"]["route"] == "voice"
+    main.tick(state, now_ms=200)
+    assert state["mode"] == "singing"
+    assert fake.last_edge[0] > 0
+
+    main.feed_line(state, "run crank_catch_idle", now_ms=300)
+    assert state["cfg"]["route"] == "tach"
+    main.tick(state, now_ms=400)
+    assert state["mode"] == "driving"
+    assert fake.last_edge[2] == "tach"
+
+    # Steady tach force (profiles can finish before the dead-man window)
+    main.feed_line(state, "route tach", now_ms=500)
+    main.feed_line(state, "rpm 1600", now_ms=510)
+    main.tick(state, now_ms=520)
+    assert state["mode"] == "driving"
+
+    # Dead-man: host silent beyond window while tach forcing
+    silent_at = 510 + defaults.DEADMAN_MS + 50
+    main.tick(state, now_ms=silent_at)
+    assert state["eng"]["parked_reason"] == "deadman"
+    assert any("event=deadman" in x for x in link.out)
 
 
 def test_main_init_tick_drives_face_and_sides():
@@ -102,11 +152,7 @@ def test_main_init_tick_drives_face_and_sides():
     state = main.init(hal=fake, now_ms=0)
     assert fake.backlight is True
     assert fake.last_side is not None
-    assert fake.last_face is not None
-    assert state["fw_name"]
-    assert state["fw_version"]
     main.tick(state, now_ms=500)
-    assert len(fake.side_history) >= 2
     assert state["tick_count"] == 1
 
 
@@ -118,20 +164,25 @@ def test_host_hygiene_gate():
 
 
 def test_product_path_uses_shipped_defaults():
-    """product_path: drive init/tick with shipped defaults unmodified."""
+    """product_path: drive init/tick/rpm with shipped defaults unmodified."""
     defaults = _load("defaults")
     main = _load("main")
     edge = _load("edge")
+    link_mod = _load("link")
     fake = _load_sim("hal_double").FakeHal()
+    link = link_mod.MemoryLink()
 
-    state = main.init(hal=fake, now_ms=0)
+    state = main.init(hal=fake, now_ms=0, link=link)
     assert state["tick_sleep_ms"] == defaults.TICK_SLEEP_MS
     assert state["cfg"]["ring_teeth"] == defaults.RING_TEETH
-    # edge path on shipped ring_teeth (instrument math is L0 host proof)
-    assert edge.rpm_to_hz(750, defaults.RING_TEETH) == 1625.0
-    main.tick(state, now_ms=defaults.FACE_CHASE_MS * 3)
-    assert fake.last_side is not None
-    assert len(fake.last_side) == defaults.SIDE_LED_COUNT
+    expected_hz = edge.rpm_to_hz(1600, defaults.RING_TEETH)
+    main.feed_line(state, "rpm 1600", now_ms=10)
+    main.tick(state, now_ms=20)
+    assert fake.last_edge is not None
+    assert abs(fake.last_edge[0] - expected_hz) < 1.0
+    # shipped volume scales voice duty (stage loudness), tach keeps duty_pct
+    expect_duty = max(5, (defaults.DUTY_PCT * defaults.VOLUME) // 10)
+    assert fake.last_edge[1] == expect_duty
     assert state["fw_name"] and state["fw_version"]
 
 

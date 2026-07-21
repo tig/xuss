@@ -11,6 +11,10 @@ class FakeHal:
         self.face_history: list[dict] = []
         self.last_side = None
         self.last_face = None
+        self.edge_history: list[tuple] = []
+        self.last_edge = None
+        self.park_count = 0
+        self.reboot_count = 0
 
     def set_led(self, on: bool) -> None:
         self.led = bool(on)
@@ -26,6 +30,19 @@ class FakeHal:
 
     def set_backlight(self, on: bool) -> None:
         self.backlight = bool(on)
+
+    def set_edge(self, hz, duty_pct, route) -> None:
+        rec = (float(hz or 0), int(duty_pct), str(route))
+        self.last_edge = rec
+        self.edge_history.append(rec)
+
+    def park_outputs(self) -> None:
+        self.park_count += 1
+        self.last_edge = (0.0, 0, "park")
+        self.edge_history.append(self.last_edge)
+
+    def reboot(self) -> None:
+        self.reboot_count += 1
 
     def ticks_ms(self) -> int:
         return self._ticks

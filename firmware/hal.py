@@ -6,10 +6,9 @@ with boring values. Device backends live in ``hal_board`` (may import machine).
 
 
 class Hal:
-    """Xuss HAL: time helpers, side LEDs, IPS face."""
+    """Xuss HAL: time, face, edge sinks, escape hatch."""
 
     def set_led(self, on: bool) -> None:
-        """Legacy status LED. On M5GO this maps to a center side-pair highlight."""
         raise NotImplementedError
 
     def set_side_leds(self, colors) -> None:
@@ -17,17 +16,26 @@ class Hal:
         raise NotImplementedError
 
     def show_face(self, frame) -> None:
-        """Render a face frame dict (eyes, identity, mode) on the IPS panel."""
+        """Render a face frame dict on the IPS panel."""
         raise NotImplementedError
 
     def set_backlight(self, on: bool) -> None:
-        """LCD backlight."""
+        raise NotImplementedError
+
+    def set_edge(self, hz, duty_pct, route) -> None:
+        """Square-wave engine to voice / tach / both. hz<=0 parks that sink."""
+        raise NotImplementedError
+
+    def park_outputs(self) -> None:
+        """Release all actuation to passive (dead-man / stop / repl)."""
+        raise NotImplementedError
+
+    def reboot(self) -> None:
+        """Hard reset after parking."""
         raise NotImplementedError
 
     def ticks_ms(self) -> int:
-        """Monotonic milliseconds (wrap-safe diffs are the caller's problem)."""
         raise NotImplementedError
 
     def sleep_ms(self, ms: int) -> None:
-        """Block for approximately ``ms`` milliseconds."""
         raise NotImplementedError
