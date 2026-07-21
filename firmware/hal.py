@@ -2,17 +2,26 @@
 
 Domain logic talks to this surface only. Host sim implements the same methods
 with boring values. Device backends live in ``hal_board`` (may import machine).
-
-v1 does not prescribe product-specific pin methods as a silico API. Extend this
-class (or a Protocol) with your GCU's reads/writes; keep time helpers stable.
 """
 
 
 class Hal:
-    """Minimal HAL surface every GCU plate starts with."""
+    """Xuss HAL: time helpers, side LEDs, IPS face."""
 
     def set_led(self, on: bool) -> None:
-        """Drive status LED. ``on=True`` means illuminated (backend maps polarity)."""
+        """Legacy status LED. On M5GO this maps to a center side-pair highlight."""
+        raise NotImplementedError
+
+    def set_side_leds(self, colors) -> None:
+        """Drive ten side SK6812s. ``colors`` is a sequence of (r, g, b) 0-255."""
+        raise NotImplementedError
+
+    def show_face(self, frame) -> None:
+        """Render a face frame dict (eyes, identity, mode) on the IPS panel."""
+        raise NotImplementedError
+
+    def set_backlight(self, on: bool) -> None:
+        """LCD backlight."""
         raise NotImplementedError
 
     def ticks_ms(self) -> int:
