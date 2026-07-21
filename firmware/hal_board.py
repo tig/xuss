@@ -166,13 +166,16 @@ def make_board_hal():
 
     from machine import ADC, DAC  # type: ignore
 
-    # Hold Pin objects; rebuild PWM on each tune for cleaner ESP32 LEDC retune
+    # Do NOT leave LEDC running at boot — duty=0 PWM still hums the M5 amp.
+    # Idle = digital OUT low, no PWM/DAC object.
     spk_pin = Pin(SPEAKER_PIN, Pin.OUT)
+    spk_pin.value(0)
     tach_pin = Pin(TACH_PIN, Pin.OUT)
-    spk_pwm = [PWM(spk_pin, freq=1000, duty_u16=0)]
-    tach_pwm = [PWM(tach_pin, freq=1000, duty_u16=0)]
-    spk_dac = [None]  # lazy DAC when playing samples
-    voice_mode = ["pwm"]  # pwm | dac
+    tach_pin.value(0)
+    spk_pwm = [None]
+    tach_pwm = [None]
+    spk_dac = [None]
+    voice_mode = ["off"]  # off | pwm | dac
     _last_spk = [None]
     _last_tach = [None]
 
@@ -194,13 +197,47 @@ def make_board_hal():
     except Exception:
         pir_pin = None
 
-    def _spk_to_dac():
-        if voice_mode[0] == "dac" and spk_dac[0] is not None:
-            return
+    def _spk_off():
+        """True silence: tear down DAC/PWM and drive pin low."""
+        if spk_pwm[0] is not None:
+            try:
+                spk_pwm[0].duty_u16(0)
+            except Exception:
+                pass
+            try:
+                spk_pwm[0].deinit()
+            except Exception:
+                pass
+            spk_pwm[0] = None
+        spk_dac[0] = None
         try:
-            spk_pwm[0].deinit()
+            p = Pin(SPEAKER_PIN, Pin.OUT)
+            p.value(0)
         except Exception:
             pass
+        voice_mode[0] = "off"
+        _last_spk[0] = (0.0, 0)
+
+    def _tach_off():
+        if tach_pwm[0] is not None:
+            try:
+                tach_pwm[0].duty_u16(0)
+            except Exception:
+                pass
+            try:
+                tach_pwm[0].deinit()
+            except Exception:
+                pass
+            tach_pwm[0] = None
+        try:
+            p = Pin(TACH_PIN, Pin.OUT)
+            p.value(0)
+        except Exception:
+            pass
+        _last_tach[0] = (0.0, 0)
+
+    def _spk_to_dac():
+        _spk_off()
         try:
             spk_dac[0] = DAC(Pin(SPEAKER_PIN))
             spk_dac[0].write(128)
@@ -209,73 +246,57 @@ def make_board_hal():
         voice_mode[0] = "dac"
         _last_spk[0] = None
 
-    def _spk_to_pwm():
-        if voice_mode[0] == "pwm":
-            return
-        spk_dac[0] = None
-        try:
-            spk_pwm[0] = PWM(spk_pin, freq=1000, duty_u16=0)
-        except Exception:
-            pass
-        voice_mode[0] = "pwm"
-        _last_spk[0] = None
-
-    def _pwm_off(slot):
-        try:
-            slot[0].duty_u16(0)
-        except Exception:
-            try:
-                slot[0].duty(0)
-            except Exception:
-                pass
-
     def _spk_set(hz, duty_pct):
         key = (float(hz or 0), int(duty_pct))
-        if key == _last_spk[0] and voice_mode[0] == "pwm":
-            return
-        _spk_to_pwm()
-        _pwm_off(spk_pwm)
         if hz is None or hz <= 0:
-            _last_spk[0] = (0.0, 0)
+            if _last_spk[0] != (0.0, 0) or voice_mode[0] != "off":
+                _spk_off()
             return
+        if key == _last_spk[0] and voice_mode[0] == "pwm" and spk_pwm[0] is not None:
+            return
+        # stop any DAC/prior PWM cleanly
+        if spk_dac[0] is not None or voice_mode[0] == "dac":
+            _spk_off()
         ihz = int(round(float(hz)))
         if ihz < 1:
             ihz = 1
         try:
-            try:
-                spk_pwm[0].deinit()
-            except Exception:
-                pass
-            # LEDC re-init avoids in-place freq glitches on ESP32
-            spk_pwm[0] = PWM(spk_pin, freq=ihz, duty_u16=0)
+            if spk_pwm[0] is not None:
+                try:
+                    spk_pwm[0].deinit()
+                except Exception:
+                    pass
+            spk_pwm[0] = PWM(Pin(SPEAKER_PIN), freq=ihz, duty_u16=0)
             time.sleep_ms(1)
             spk_pwm[0].duty_u16(_pwm_duty_u16(duty_pct))
+            voice_mode[0] = "pwm"
             _last_spk[0] = key
         except Exception:
-            _last_spk[0] = (0.0, 0)
+            _spk_off()
 
     def _tach_set(hz, duty_pct):
         key = (float(hz or 0), int(duty_pct))
-        if key == _last_tach[0]:
-            return
-        _pwm_off(tach_pwm)
         if hz is None or hz <= 0:
-            _last_tach[0] = (0.0, 0)
+            if _last_tach[0] != (0.0, 0):
+                _tach_off()
+            return
+        if key == _last_tach[0] and tach_pwm[0] is not None:
             return
         ihz = int(round(float(hz)))
         if ihz < 1:
             ihz = 1
         try:
-            try:
-                tach_pwm[0].deinit()
-            except Exception:
-                pass
-            tach_pwm[0] = PWM(tach_pin, freq=ihz, duty_u16=0)
+            if tach_pwm[0] is not None:
+                try:
+                    tach_pwm[0].deinit()
+                except Exception:
+                    pass
+            tach_pwm[0] = PWM(Pin(TACH_PIN), freq=ihz, duty_u16=0)
             time.sleep_ms(1)
             tach_pwm[0].duty_u16(_pwm_duty_u16(duty_pct))
             _last_tach[0] = key
         except Exception:
-            _last_tach[0] = (0.0, 0)
+            _tach_off()
 
     _last_face_key = [None]
     _last_edge = [None]
@@ -356,16 +377,16 @@ def make_board_hal():
             if voice_on:
                 _spk_set(hz, duty)
             else:
-                _spk_set(0, 0)
+                _spk_off()
             if tach_on:
                 _tach_set(hz, duty)
             else:
-                _tach_set(0, 0)
+                _tach_off()
 
         def park_outputs(self) -> None:
             _last_edge[0] = (0.0, 0, "park", 0)
-            _spk_set(0, 0)
-            _tach_set(0, 0)
+            _spk_off()
+            _tach_off()
 
         def reboot(self) -> None:
             self.park_outputs()
@@ -390,13 +411,8 @@ def make_board_hal():
                 time.sleep_us(us)
 
         def dac_idle(self) -> None:
-            if spk_dac[0] is not None:
-                try:
-                    spk_dac[0].write(128)
-                except Exception:
-                    pass
-            _spk_to_pwm()
-            _spk_set(0, 0)
+            # After sample playback: full silence (not idle PWM hum)
+            _spk_off()
 
         def read_angle_raw(self) -> int:
             if angle_adc is None:

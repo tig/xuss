@@ -7,7 +7,7 @@ from face import frame as face_frame
 from inputs import adc_to_rpm, chirp_active, make_presence, tick_presence
 from link import LineAssembler, make_stdio_link
 from protocol import handle_line, identity_line
-from riff import load_riff_bytes, make_riff, riff_advance, riff_done, riff_samples_for_tick
+from riff import load_riff_bytes, make_riff
 from store import load_from_hal, save_to_hal
 from version import FW_NAME, FW_VERSION
 
@@ -17,11 +17,18 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
     loaded = load_from_hal(hal)
     if loaded is not None:
         cfg = loaded
+    # Never load a stuck engine from a bad save
+    cfg["rpm"] = 0
+    if "knob" in cfg:
+        # knob left on with floating ADC = endless tone; require explicit set
+        pass
 
     eng = make_engine(now_ms=now_ms)
+    # Riff is one-shot in init (not streamed in the tick loop — that interleaved
+    # NeoPixel/LCD traffic with DAC and left LEDC humming after).
     if riff_data is None:
         riff_data = _device_or_host_riff(hal)
-    riff = make_riff(riff_data, now_ms=now_ms)
+    riff = make_riff(b"", now_ms=now_ms)  # inactive in tick path
 
     state = {
         "hal": hal,
@@ -44,13 +51,30 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
         "save_requested": False,
         "identity_sent": False,
         "last_hz": 0.0,
+        "audio_on": False,
     }
     if hal is not None and hasattr(hal, "set_backlight"):
         hal.set_backlight(True)
-    # Identity first (spec §5) — before riff blocks chunks
+    if hal is not None and hasattr(hal, "park_outputs"):
+        hal.park_outputs()
+    # Identity first (spec §5)
     _emit(state, identity_line())
     state["identity_sent"] = True
     _paint(state, now_ms)
+    # One-shot boot riff, then hard silence
+    if riff_data:
+        if hasattr(hal, "write_dac_samples"):
+            try:
+                hal.write_dac_samples(riff_data)
+            except Exception:
+                pass
+        if hasattr(hal, "dac_idle"):
+            try:
+                hal.dac_idle()
+            except Exception:
+                pass
+        if hasattr(hal, "park_outputs"):
+            hal.park_outputs()
     return state
 
 
@@ -112,8 +136,6 @@ def _paint(state, now_ms=None):
     if elapsed < 0:
         elapsed = 0
     mode = face_mode(state["eng"], state["cfg"])
-    if not riff_done(state.get("riff")):
-        mode = "singing"
     state["mode"] = mode
     identity = "%s %s" % (state["fw_name"], state["fw_version"])
     fr = face_frame(elapsed, mode=mode, identity=identity)
@@ -122,8 +144,12 @@ def _paint(state, now_ms=None):
     hal = state.get("hal")
     if hal is None:
         return fr
-    if hasattr(hal, "set_side_leds"):
+    # Only push LEDs when the frame changes (avoids continuous SK6812 traffic)
+    prev = state.get("_side_key")
+    side_key = (mode, fr.get("eyes_open"), fr["side"][0] if fr.get("side") else None)
+    if prev != side_key and hasattr(hal, "set_side_leds"):
         hal.set_side_leds(fr["side"])
+        state["_side_key"] = side_key
     if hasattr(hal, "show_face"):
         hal.show_face(fr)
     return fr
@@ -135,33 +161,23 @@ def _drive_edge(state, now_ms=None):
     eng = state["eng"]
     hal = state.get("hal")
 
-    # Boot riff owns the speaker until done (serial still polled in tick)
-    if not riff_done(state.get("riff")):
-        n = riff_samples_for_tick(state["riff"], state.get("tick_sleep_ms", TICK_SLEEP_MS))
-        still = riff_advance(state["riff"], n, hal=hal)
-        if not still and hasattr(hal, "park_outputs"):
-            # hard silence after riff — no residual LEDC buzz
-            hal.park_outputs()
-        state["last_hz"] = 0.0
-        state["_was_chirp"] = False
-        return 0.0
-
-    # PIR greet chirp (short) when not instrument-busy
+    # PIR greet chirp (only if greet=1)
     pres = state["presence"]
-    if chirp_active(pres, t):
+    if int(cfg.get("greet") or 0) == 1 and chirp_active(pres, t):
         if hasattr(hal, "set_edge"):
             vol = int(cfg.get("volume") or 0)
             if int(cfg.get("mute") or 0) == 0 and vol > 0:
                 hal.set_edge(float(pres.get("chirp_hz") or 880), 50, "voice", volume=vol)
+                state["audio_on"] = True
         state["last_hz"] = float(pres.get("chirp_hz") or 0)
         state["_was_chirp"] = True
         return state["last_hz"]
 
-    # Chirp just ended: park so we do not leave 880 Hz PWM running
     if state.get("_was_chirp"):
         state["_was_chirp"] = False
         if hasattr(hal, "park_outputs"):
             hal.park_outputs()
+        state["audio_on"] = False
 
     # ANGLE knob live rpm only when enabled
     if int(cfg.get("knob") or 0) == 1 and hal is not None and hasattr(hal, "read_angle_raw"):
@@ -186,30 +202,33 @@ def _drive_edge(state, now_ms=None):
             out_route = "tach"
 
     if hz <= 0:
-        if hasattr(hal, "park_outputs"):
-            hal.park_outputs()
-        elif hasattr(hal, "set_edge"):
-            hal.set_edge(0, duty, out_route, volume=vol)
-    elif hasattr(hal, "set_edge"):
-        hal.set_edge(hz, duty, out_route, volume=vol)
+        # Park only on falling edge of audio — not every idle tick
+        if state.get("audio_on"):
+            if hasattr(hal, "park_outputs"):
+                hal.park_outputs()
+            state["audio_on"] = False
+    else:
+        if hasattr(hal, "set_edge"):
+            hal.set_edge(hz, duty, out_route, volume=vol)
+        state["audio_on"] = True
     state["last_hz"] = hz
     return hz
 
 
 def _poll_inputs(state, now_ms=None):
     t = _now(state, now_ms)
-    # No PIR while boot riff is still playing
-    if not riff_done(state.get("riff")):
+    cfg = state["cfg"]
+    # Skip PIR work entirely when greet disabled (floating pin cannot peep)
+    if int(cfg.get("greet") or 0) != 1:
         return
     hal = state.get("hal")
-    cfg = state["cfg"]
     pir = 0
     if hal is not None and hasattr(hal, "read_pir"):
         pir = hal.read_pir()
     event = tick_presence(
         state["presence"],
         pir,
-        greet_enabled=int(cfg.get("greet") or 0) == 1,
+        greet_enabled=True,
         instrument_busy=_instrument_busy(state),
         now_ms=t,
     )
@@ -337,9 +356,6 @@ def main():
             break
         tick(state)
         sleep_ms = state.get("tick_sleep_ms", TICK_SLEEP_MS)
-        # While riff plays, sample chunks already used wall time; keep loop snappy
-        if not riff_done(state.get("riff")):
-            sleep_ms = 5
         if hasattr(hal, "sleep_ms"):
             hal.sleep_ms(sleep_ms)
         else:
