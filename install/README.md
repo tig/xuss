@@ -1,28 +1,49 @@
 # Install / update (Xuss / M5GO)
 
-## Day-2 one-liner (after first flash is done)
+## Day-2 one-liner
 
 ```text
 python -m pytest -q
-silico deploy --port COM7 --yes --verify
+silico deploy --port COM7 --yes --verify --reset
+mpremote connect COM7 cp assets/boot-riff.u8.raw :boot_riff.u8.raw
 ```
 
-**Good on metal:** device `FW_VERSION` matches host (`XUSS 0.0.1` for this plate).
-Plate LED defaults are still XIAO-shaped (GPIO16); the M5GO face/side LEDs are domain work.
+(Or one soft reboot after both writes.) Confirm board identity before `--yes`.
 
-Always pass an explicit port. Confirm board identity every session before `--yes`.
+**Good on metal:** `identity` answers `fw_name=XUSS`; side LEDs chase; boot riff once after power; `rpm 750` sings; `repl` opens the door for redeploy.
 
-## First-time metal prep (already done on this bench)
+## Hardware map (v0.3)
 
-1. Board: M5Stack **M5GO IoT Starter Kit v2.7** (ESP32-D0WDQ6-V3, 16MB flash).
-2. USB serial: **CH9102** (this bench: **COM7**).
-3. Stock was UIFlow-era MicroPython 1.12; first flash is **esptool**, not UF2:
+| Function | Pin / port |
+|----------|------------|
+| Speaker | G25 |
+| Tach edge (Port B yellow) | G26 |
+| ANGLE ADC (Port B white) | G36 |
+| PIR (Port C yellow) | G17 |
+| Side SK6812 ×10 | G15 |
+
+## First flash (once)
 
 ```text
 esptool --chip esp32 --port COM7 erase-flash
-esptool --chip esp32 --port COM7 write-flash -z 0x1000 ESP32_GENERIC-20260406-v1.28.0.bin
+esptool --chip esp32 --port COM7 write-flash -z 0x1000 ESP32_GENERIC-….bin
 ```
 
-4. Then: `silico inspect --port COM7 --apply-mpy-pin` and deploy as above.
+## L1 acceptance (operator)
 
-Stock root files from before the flash live under `.silico/stock-backup/` (gitignored).
+External measurement is required for pitch/frequency claims (spec §6). Host green is not L1 done.
+
+| Row | How |
+|-----|-----|
+| Boot riff | Power cycle; hear *First* after identity line |
+| On-pitch | `rpm 1600` + frequency counter on speaker/tach |
+| Same engine | `route both` + compare voice vs G26 |
+| Knob | `set knob 1`, turn ANGLE on Port B |
+| Greet | `set greet 1`, walk up (PIR on Port C) |
+| Dead-man | `run stall` then silence host >3s |
+| Escape | `repl` then redeploy |
+| Wrong-sensor | `set duty_pct 5` on tach |
+
+## L2 fixture
+
+Xuss as fixture for a sibling GCU metal gate: route tach to DUT tach input, `run` / `rpm` profiles, dead-man safe. Document the sibling repo issue/run when executed. Not claimed done until that gate is green on the bench.

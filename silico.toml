@@ -1,33 +1,29 @@
 [product]
 name = "Xuss"
 fw_name = "XUSS"
-fw_version = "0.2.1"
+fw_version = "0.3.0"
 
 [runtime]
-# mpy-cross ABI: Silico owns the pin. Applied from device MicroPython after
-# esptool flash of ESP32_GENERIC v1.28.0 (COM7). Re-run apply if firmware changes.
 mpy_cross = "1.28.0rc0.post2"
 board = "m5go-v27"
 
 [host]
 gate = "pytest -q"
-# Shipped parameter table the metal build runs. Host scenarios must exercise it.
 product_defaults = "firmware/defaults.py"
 
-# Modules (stems) allowed to import machine — device HAL backends only.
-# Domain modules and main must stay host-importable under CPython.
 [hal]
 allow_machine = ["hal_board"]
 
-# Ordered deploy set (basenames land on device as remote names).
-# `silico deploy --port COMx` with no file args uses this list.
 [deploy]
 core = [
   "firmware/version.py",
   "firmware/defaults.py",
   "firmware/edge.py",
   "firmware/config.py",
+  "firmware/store.py",
   "firmware/engine.py",
+  "firmware/inputs.py",
+  "firmware/riff.py",
   "firmware/link.py",
   "firmware/protocol.py",
   "firmware/face.py",

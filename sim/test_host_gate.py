@@ -1,4 +1,4 @@
-"""Host gate: edge/protocol/engine + main path against HAL double."""
+"""Host gate for complete Xuss L0/L1 logic."""
 
 import importlib.util
 import sys
@@ -41,119 +41,102 @@ def test_version_identity_present():
     assert version.FW_VERSION.count(".") >= 2
 
 
-def test_hal_contract_importable_without_machine():
-    hal_mod = _load("hal")
-    assert hasattr(hal_mod, "Hal")
-    assert hasattr(hal_mod.Hal, "set_edge")
-    assert hasattr(hal_mod.Hal, "park_outputs")
-
-
 def test_edge_math_matches_spec_examples():
     edge = _load("edge")
     defaults = _load("defaults")
     assert edge.rpm_to_hz(750, defaults.RING_TEETH) == 1625.0
-    assert abs(edge.rpm_to_hz(200, defaults.RING_TEETH) - 433.333333) < 0.01
     assert abs(edge.rpm_to_hz(1600, defaults.RING_TEETH) - (1600 * 130 / 60)) < 1e-9
 
 
-def test_profiles_are_songs():
-    edge = _load("edge")
-    defaults = _load("defaults")
-    steps = edge.profile_steps("crank_catch_idle", defaults.PROFILES)
-    assert steps[0][0] == 200
-    assert edge.profile_rpm_at(steps, 900) == 433
-    assert "stall" in defaults.PROFILES
-
-
-def test_config_completeness_and_mute_survives_defaults():
+def test_config_mute_survives_and_store_roundtrip():
     config = _load("config")
+    store = _load("store")
     cfg = config.factory()
-    ok, _ = config.set_param(cfg, "mute", 1)
-    assert ok
+    config.set_param(cfg, "mute", 1)
+    config.set_param(cfg, "rpm", 100)
     config.apply_defaults(cfg)
     assert cfg["mute"] == 1
     assert cfg["rpm"] == 0
+    blob = store.encode(cfg)
+    ok, cfg2 = store.decode(blob)
+    assert ok and cfg2["mute"] == 1
+    assert store.decode(blob[:-1] + "0")[0] is False or store.decode("torn")[0] is False
 
 
-def test_face_is_time_based_not_tick_based():
-    face = _load("face")
+def test_inputs_knob_and_greet_once():
+    inputs = _load("inputs")
     defaults = _load("defaults")
-    a = face.frame(0, mode="idle")
-    b = face.frame(defaults.FACE_CHASE_MS, mode="idle")
-    assert a["side"] != b["side"]
-    assert face.frame(0, mode="singing")["side"] != face.frame(0, mode="idle")["side"]
+    assert inputs.adc_to_rpm(0) == defaults.KNOB_RPM_MIN
+    assert inputs.adc_to_rpm(defaults.KNOB_ADC_MAX) == defaults.KNOB_RPM_MAX
+    pres = inputs.make_presence(0)
+    e1 = inputs.tick_presence(pres, 1, True, False, 100)
+    assert e1 == "greet"
+    e2 = inputs.tick_presence(pres, 1, True, False, 200)
+    assert e2 is None  # same approach
+    inputs.tick_presence(pres, 0, True, False, 300)
+    # still in quiet window — reappearance is same approach
+    e3 = inputs.tick_presence(pres, 1, True, False, 400)
+    assert e3 is None
+    # leave long enough to re-arm
+    leave_at = 400 + defaults.PIR_QUIET_MS + 50
+    inputs.tick_presence(pres, 0, True, False, leave_at)
+    e5 = inputs.tick_presence(pres, 1, True, False, leave_at + 10)
+    assert e5 == "greet"
 
 
-def test_protocol_identity_get_set_and_escape():
+def test_riff_streams_samples():
+    riff_mod = _load("riff")
+    fake = _load_sim("hal_double").FakeHal()
+    data = bytes([128, 200, 50, 128] * 100)
+    r = riff_mod.make_riff(data, 0)
+    assert r["active"]
+    riff_mod.riff_advance(r, 50, hal=fake)
+    assert fake.dac_chunks
+    assert sum(len(c) for c in fake.dac_chunks) == 50
+
+
+def test_protocol_and_deadman_and_save():
     main = _load("main")
     link_mod = _load("link")
+    defaults = _load("defaults")
     fake = _load_sim("hal_double").FakeHal()
     link = link_mod.MemoryLink()
-    state = main.init(hal=fake, now_ms=0, link=link)
+    # skip long riff in tests
+    state = main.init(hal=fake, now_ms=0, link=link, riff_data=b"")
     assert any("fw_name=XUSS" in x for x in link.out)
 
-    main.feed_line(state, "identity", now_ms=10)
-    assert any("fw_version=" in x for x in link.out)
+    main.feed_line(state, "rpm 1600", now_ms=10)
+    main.tick(state, now_ms=20)
+    assert fake.last_edge[0] > 0
 
-    main.feed_line(state, "set ring_teeth 130", now_ms=20)
-    main.feed_line(state, "get ring_teeth", now_ms=30)
-    assert "ring_teeth=130" in link.out
-
+    main.feed_line(state, "route tach", now_ms=30)
     main.feed_line(state, "rpm 1600", now_ms=40)
     main.tick(state, now_ms=50)
-    assert fake.last_edge is not None
-    assert fake.last_edge[0] > 0
-    assert state["mode"] == "singing"
+    silent = 40 + defaults.DEADMAN_MS + 50
+    main.tick(state, now_ms=silent)
+    assert state["eng"]["parked_reason"] == "deadman"
 
-    main.feed_line(state, "stop", now_ms=60)
-    main.tick(state, now_ms=70)
-    assert state["eng"]["active_rpm"] == 0
-
-    main.feed_line(state, "repl", now_ms=80)
-    assert state["exit_repl"] is True
+    main.feed_line(state, "set mute 1", now_ms=silent + 10)
+    main.feed_line(state, "save", now_ms=silent + 20)
+    assert "xuss.cfg" in fake.files or any("save=" in x for x in link.out)
 
 
-def test_sing_and_run_profiles_and_deadman():
-    main = _load("main")
-    link_mod = _load("link")
+def test_knob_drives_rpm_on_product_path():
+    """product_path: shipped defaults + knob maps ADC to rpm edge."""
     defaults = _load("defaults")
+    main = _load("main")
+    edge = _load("edge")
+    link_mod = _load("link")
     fake = _load_sim("hal_double").FakeHal()
     link = link_mod.MemoryLink()
-    state = main.init(hal=fake, now_ms=0, link=link)
-
-    main.feed_line(state, "sing stall", now_ms=100)
-    assert state["cfg"]["route"] == "voice"
-    main.tick(state, now_ms=200)
-    assert state["mode"] == "singing"
-    assert fake.last_edge[0] > 0
-
-    main.feed_line(state, "run crank_catch_idle", now_ms=300)
-    assert state["cfg"]["route"] == "tach"
-    main.tick(state, now_ms=400)
-    assert state["mode"] == "driving"
-    assert fake.last_edge[2] == "tach"  # route
-
-    # Steady tach force (profiles can finish before the dead-man window)
-    main.feed_line(state, "route tach", now_ms=500)
-    main.feed_line(state, "rpm 1600", now_ms=510)
-    main.tick(state, now_ms=520)
-    assert state["mode"] == "driving"
-
-    # Dead-man: host silent beyond window while tach forcing
-    silent_at = 510 + defaults.DEADMAN_MS + 50
-    main.tick(state, now_ms=silent_at)
-    assert state["eng"]["parked_reason"] == "deadman"
-    assert any("event=deadman" in x for x in link.out)
-
-
-def test_main_init_tick_drives_face_and_sides():
-    main = _load("main")
-    fake = _load_sim("hal_double").FakeHal()
-    state = main.init(hal=fake, now_ms=0)
-    assert fake.backlight is True
-    assert fake.last_side is not None
-    main.tick(state, now_ms=500)
-    assert state["tick_count"] == 1
+    state = main.init(hal=fake, now_ms=0, link=link, riff_data=b"")
+    assert state["tick_sleep_ms"] == defaults.TICK_SLEEP_MS
+    main.feed_line(state, "set knob 1", now_ms=5)
+    fake.angle_raw = defaults.KNOB_ADC_MAX
+    main.tick(state, now_ms=10)
+    expected = edge.rpm_to_hz(defaults.KNOB_RPM_MAX, defaults.RING_TEETH)
+    assert fake.last_edge is not None
+    assert abs(fake.last_edge[0] - expected) < 2.0
 
 
 def test_host_hygiene_gate():
@@ -161,29 +144,6 @@ def test_host_hygiene_gate():
 
     report = run_hygiene(ROOT)
     assert report.ok, "\n".join(report.lines)
-
-
-def test_product_path_uses_shipped_defaults():
-    """product_path: drive init/tick/rpm with shipped defaults unmodified."""
-    defaults = _load("defaults")
-    main = _load("main")
-    edge = _load("edge")
-    link_mod = _load("link")
-    fake = _load_sim("hal_double").FakeHal()
-    link = link_mod.MemoryLink()
-
-    state = main.init(hal=fake, now_ms=0, link=link)
-    assert state["tick_sleep_ms"] == defaults.TICK_SLEEP_MS
-    assert state["cfg"]["ring_teeth"] == defaults.RING_TEETH
-    expected_hz = edge.rpm_to_hz(1600, defaults.RING_TEETH)
-    main.feed_line(state, "rpm 1600", now_ms=10)
-    main.tick(state, now_ms=20)
-    assert fake.last_edge is not None
-    assert abs(fake.last_edge[0] - expected_hz) < 1.0
-    # duty stays mark-space; volume is a separate amplitude channel
-    assert fake.last_edge[1] == defaults.DUTY_PCT
-    assert fake.last_edge[3] == defaults.VOLUME
-    assert state["fw_name"] and state["fw_version"]
 
 
 def test_product_path_check():

@@ -77,9 +77,9 @@ def handle_line(state, line, now_ms):
         return [_ok("defaults")]
 
     if cmd == "save":
-        # Persistence image deferred — acknowledge without claiming NVS yet
+        # main performs store.save_to_hal and emits save=ok|fail
         state["save_requested"] = True
-        return [_ok("save")]
+        return []
 
     if cmd == "rpm":
         if len(parts) < 2:

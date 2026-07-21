@@ -1,21 +1,28 @@
-"""Boot entry: init + tick. Host-import safe — no machine in this module.
+"""Boot entry: init + tick. Host-import safe — no machine in this module."""
 
-L1 path: identity line, line protocol, edge engine, dead-man, escape hatch.
-Face + side LEDs stay time-based.
-"""
-
-from config import factory as config_factory
+from config import factory as config_factory, set_param
 from defaults import SERIAL_IN_BUDGET, SERIAL_OUT_BUDGET, TICK_SLEEP_MS
-from engine import face_mode, make_engine, tick_engine
+from engine import face_mode, make_engine, set_rpm, tick_engine
 from face import frame as face_frame
+from inputs import adc_to_rpm, chirp_active, make_presence, tick_presence
 from link import LineAssembler, make_stdio_link
 from protocol import handle_line, identity_line
+from riff import load_riff_bytes, make_riff, riff_advance, riff_done, riff_samples_for_tick
+from store import load_from_hal, save_to_hal
 from version import FW_NAME, FW_VERSION
 
 
-def init(hal=None, now_ms=0, link=None):
+def init(hal=None, now_ms=0, link=None, riff_data=None):
     cfg = config_factory()
+    loaded = load_from_hal(hal)
+    if loaded is not None:
+        cfg = loaded
+
     eng = make_engine(now_ms=now_ms)
+    if riff_data is None:
+        riff_data = _device_or_host_riff(hal)
+    riff = make_riff(riff_data, now_ms=now_ms)
+
     state = {
         "hal": hal,
         "link": link,
@@ -26,6 +33,8 @@ def init(hal=None, now_ms=0, link=None):
         "tick_sleep_ms": TICK_SLEEP_MS,
         "cfg": cfg,
         "eng": eng,
+        "presence": make_presence(now_ms),
+        "riff": riff,
         "mode": "idle",
         "t0_ms": int(now_ms),
         "last_face": None,
@@ -34,15 +43,30 @@ def init(hal=None, now_ms=0, link=None):
         "do_reboot": False,
         "save_requested": False,
         "identity_sent": False,
+        "last_hz": 0.0,
     }
     if hal is not None and hasattr(hal, "set_backlight"):
         hal.set_backlight(True)
-    # Identity first on the link (spec §5)
+    # Identity first (spec §5) — before riff blocks chunks
     _emit(state, identity_line())
     state["identity_sent"] = True
     _paint(state, now_ms)
-    _drive_edge(state, now_ms)
     return state
+
+
+def _device_or_host_riff(hal):
+    # Device file
+    if hal is not None and hasattr(hal, "read_text"):
+        # binary: prefer open via read if available
+        pass
+    try:
+        from defaults import BOOT_RIFF_PATH
+
+        with open(BOOT_RIFF_PATH, "rb") as f:
+            return f.read()
+    except Exception:
+        pass
+    return load_riff_bytes()
 
 
 def _emit(state, line):
@@ -52,13 +76,11 @@ def _emit(state, line):
 
 
 def _emit_budget(state, lines):
-    """Egress capped per tick (character budget)."""
     budget = int(SERIAL_OUT_BUDGET)
     for line in lines:
         s = str(line)
         cost = len(s) + 1
         if cost > budget:
-            # still send a truncated err if possible
             if budget > 8:
                 _emit(state, s[: budget - 1])
             break
@@ -75,12 +97,23 @@ def _now(state, now_ms=None):
     return 0
 
 
+def _instrument_busy(state):
+    eng = state["eng"]
+    if eng.get("forcing") and int(eng.get("active_rpm") or 0) > 0:
+        return True
+    if eng.get("profile_steps") is not None:
+        return True
+    return False
+
+
 def _paint(state, now_ms=None):
     t = _now(state, now_ms)
     elapsed = t - int(state.get("t0_ms", 0))
     if elapsed < 0:
         elapsed = 0
     mode = face_mode(state["eng"], state["cfg"])
+    if not riff_done(state.get("riff")):
+        mode = "singing"
     state["mode"] = mode
     identity = "%s %s" % (state["fw_name"], state["fw_version"])
     fr = face_frame(elapsed, mode=mode, identity=identity)
@@ -100,19 +133,43 @@ def _drive_edge(state, now_ms=None):
     t = _now(state, now_ms)
     cfg = state["cfg"]
     eng = state["eng"]
+    hal = state.get("hal")
+
+    # Boot riff owns the speaker until done (still poll serial elsewhere)
+    if not riff_done(state.get("riff")):
+        n = riff_samples_for_tick(state["riff"], state.get("tick_sleep_ms", TICK_SLEEP_MS))
+        riff_advance(state["riff"], n, hal=hal)
+        # park engine square while riff plays
+        if hasattr(hal, "set_edge"):
+            # only tach could run during riff if route tach — keep silent both for manners
+            pass
+        state["last_hz"] = 0.0
+        return 0.0
+
+    # PIR greet chirp (short) when not instrument-busy
+    pres = state["presence"]
+    if chirp_active(pres, t):
+        if hasattr(hal, "set_edge"):
+            vol = int(cfg.get("volume") or 0)
+            if int(cfg.get("mute") or 0) == 0 and vol > 0:
+                hal.set_edge(float(pres.get("chirp_hz") or 880), 50, "voice", volume=vol)
+        state["last_hz"] = float(pres.get("chirp_hz") or 0)
+        return state["last_hz"]
+
+    # ANGLE knob live rpm
+    if int(cfg.get("knob") or 0) == 1 and hal is not None and hasattr(hal, "read_angle_raw"):
+        raw = hal.read_angle_raw()
+        rpm = adc_to_rpm(raw)
+        set_param(cfg, "rpm", rpm)
+        set_rpm(eng, rpm, t)
+
     hz, duty, route, event = tick_engine(eng, cfg, t)
     if event == "deadman":
         _emit(state, "event=deadman")
     if event == "profile_done":
         _emit(state, "event=profile_done")
-        try:
-            from config import set_param
+        set_param(cfg, "rpm", 0)
 
-            set_param(cfg, "rpm", 0)
-        except Exception:
-            cfg["rpm"] = 0
-
-    # mute / volume 0 park voice only; tach duty stays honest mark-space
     out_route = route
     vol = int(cfg.get("volume") or 0)
     if int(cfg.get("mute") or 0) == 1 or vol <= 0:
@@ -121,18 +178,30 @@ def _drive_edge(state, now_ms=None):
         elif route == "both":
             out_route = "tach"
 
-    hal = state.get("hal")
-    if hal is None:
-        state["last_hz"] = hz
-        return hz
-
     if hasattr(hal, "set_edge"):
-        # volume is amplitude on the voice sink, never a thinner duty cycle
         hal.set_edge(hz if hz > 0 else 0, duty, out_route, volume=vol)
     elif hz <= 0 and hasattr(hal, "park_outputs"):
         hal.park_outputs()
     state["last_hz"] = hz
     return hz
+
+
+def _poll_inputs(state, now_ms=None):
+    t = _now(state, now_ms)
+    hal = state.get("hal")
+    cfg = state["cfg"]
+    pir = 0
+    if hal is not None and hasattr(hal, "read_pir"):
+        pir = hal.read_pir()
+    event = tick_presence(
+        state["presence"],
+        pir,
+        greet_enabled=int(cfg.get("greet") or 0) == 1,
+        instrument_busy=_instrument_busy(state),
+        now_ms=t,
+    )
+    if event == "greet":
+        _emit(state, "event=greet")
 
 
 def _poll_serial(state, now_ms=None):
@@ -145,6 +214,12 @@ def _poll_serial(state, now_ms=None):
     for line in lines:
         responses = handle_line(state, line, t)
         _emit_budget(state, responses)
+        if state.get("save_requested"):
+            state["save_requested"] = False
+            if save_to_hal(state.get("hal"), state["cfg"]):
+                _emit(state, "save=ok")
+            else:
+                _emit(state, "save=fail")
         if state.get("exit_repl") or state.get("do_reboot"):
             break
 
@@ -155,7 +230,6 @@ def tick(state, now_ms=None):
     _poll_serial(state, t)
     if state.get("exit_repl") or state.get("do_reboot"):
         _park(state)
-        # Restore interrupt char immediately so mpremote/silico can reclaim CDC
         if state.get("exit_repl"):
             try:
                 import micropython
@@ -164,12 +238,11 @@ def tick(state, now_ms=None):
             except Exception:
                 pass
         return state
+    _poll_inputs(state, t)
     _drive_edge(state, t)
     _paint(state, t)
-    # telemetry only when host enables it (default 0 = silence)
     hz_tel = int(state["cfg"].get("telemetry_hz") or 0)
     if hz_tel > 0:
-        # emit about hz_tel times per second based on wall time
         period = max(1, 1000 // hz_tel)
         last = int(state.get("_tel_ms") or 0)
         if t - last >= period:
@@ -196,7 +269,6 @@ def _park(state):
 
 
 def feed_line(state, line, now_ms=None):
-    """Host-test helper: inject one command line."""
     t = _now(state, now_ms)
     link = state.get("link")
     if link is not None and hasattr(link, "feed_line"):
@@ -205,11 +277,30 @@ def feed_line(state, line, now_ms=None):
     else:
         responses = handle_line(state, line, t)
         _emit_budget(state, responses)
+        if state.get("save_requested"):
+            state["save_requested"] = False
+            if save_to_hal(state.get("hal"), state["cfg"]):
+                _emit(state, "save=ok")
+            else:
+                _emit(state, "save=fail")
     return state
 
 
 def main():
+    from defaults import BOOT_RIFF_PATH
     from hal_board import make_board_hal
+
+    # Ensure riff file name alias if only host name present
+    try:
+        import uos as os  # type: ignore
+    except ImportError:
+        import os  # type: ignore
+    try:
+        if BOOT_RIFF_PATH not in os.listdir() and "boot-riff.u8.raw" in os.listdir():
+            # no rename required if we open both in loader
+            pass
+    except Exception:
+        pass
 
     hal = make_board_hal()
     link = make_stdio_link()
@@ -219,7 +310,6 @@ def main():
     while True:
         if state.get("exit_repl"):
             _park(state)
-            # restore default Ctrl-C interrupt if available
             try:
                 import micropython
 
@@ -234,6 +324,9 @@ def main():
             break
         tick(state)
         sleep_ms = state.get("tick_sleep_ms", TICK_SLEEP_MS)
+        # While riff plays, sample chunks already used wall time; keep loop snappy
+        if not riff_done(state.get("riff")):
+            sleep_ms = 5
         if hasattr(hal, "sleep_ms"):
             hal.sleep_ms(sleep_ms)
         else:

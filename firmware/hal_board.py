@@ -8,6 +8,8 @@ voice; 1-10 play a clean mark-space square (default 50%).
 """
 
 from defaults import (
+    ANGLE_ADC_PIN,
+    BOOT_RIFF_HZ,
     FACE_BG_COLOR,
     FACE_DRIVE_COLOR,
     FACE_EYE_COLOR,
@@ -22,6 +24,7 @@ from defaults import (
     LCD_SCK_PIN,
     LCD_SPI_ID,
     LCD_WIDTH,
+    PIR_PIN,
     SIDE_LED_COUNT,
     SIDE_LED_PIN,
     SPEAKER_PIN,
@@ -161,13 +164,57 @@ def make_board_hal():
     except Exception:
         lcd_ok = False
 
+    from machine import ADC, DAC  # type: ignore
+
     # Hold Pin objects; rebuild PWM on each tune for cleaner ESP32 LEDC retune
     spk_pin = Pin(SPEAKER_PIN, Pin.OUT)
     tach_pin = Pin(TACH_PIN, Pin.OUT)
     spk_pwm = [PWM(spk_pin, freq=1000, duty_u16=0)]
     tach_pwm = [PWM(tach_pin, freq=1000, duty_u16=0)]
+    spk_dac = [None]  # lazy DAC when playing samples
+    voice_mode = ["pwm"]  # pwm | dac
     _last_spk = [None]
     _last_tach = [None]
+
+    try:
+        angle_adc = ADC(Pin(ANGLE_ADC_PIN))
+        try:
+            angle_adc.atten(ADC.ATTN_11DB)
+        except Exception:
+            pass
+    except Exception:
+        angle_adc = None
+
+    try:
+        pir_pin = Pin(PIR_PIN, Pin.IN)
+    except Exception:
+        pir_pin = None
+
+    def _spk_to_dac():
+        if voice_mode[0] == "dac" and spk_dac[0] is not None:
+            return
+        try:
+            spk_pwm[0].deinit()
+        except Exception:
+            pass
+        try:
+            spk_dac[0] = DAC(Pin(SPEAKER_PIN))
+            spk_dac[0].write(128)
+        except Exception:
+            spk_dac[0] = None
+        voice_mode[0] = "dac"
+        _last_spk[0] = None
+
+    def _spk_to_pwm():
+        if voice_mode[0] == "pwm":
+            return
+        spk_dac[0] = None
+        try:
+            spk_pwm[0] = PWM(spk_pin, freq=1000, duty_u16=0)
+        except Exception:
+            pass
+        voice_mode[0] = "pwm"
+        _last_spk[0] = None
 
     def _pwm_off(slot):
         try:
@@ -180,8 +227,9 @@ def make_board_hal():
 
     def _spk_set(hz, duty_pct):
         key = (float(hz or 0), int(duty_pct))
-        if key == _last_spk[0]:
+        if key == _last_spk[0] and voice_mode[0] == "pwm":
             return
+        _spk_to_pwm()
         _pwm_off(spk_pwm)
         if hz is None or hz <= 0:
             _last_spk[0] = (0.0, 0)
@@ -320,6 +368,61 @@ def make_board_hal():
             import machine  # type: ignore
 
             machine.reset()
+
+        def write_dac_samples(self, data) -> None:
+            if not data:
+                return
+            _spk_to_dac()
+            dac = spk_dac[0]
+            if dac is None:
+                return
+            # ~11025 Hz: ~90 us/sample
+            us = max(1, int(1000000 // int(BOOT_RIFF_HZ)))
+            for b in data:
+                try:
+                    dac.write(int(b) & 0xFF)
+                except Exception:
+                    break
+                time.sleep_us(us)
+
+        def dac_idle(self) -> None:
+            if spk_dac[0] is not None:
+                try:
+                    spk_dac[0].write(128)
+                except Exception:
+                    pass
+            _spk_to_pwm()
+            _spk_set(0, 0)
+
+        def read_angle_raw(self) -> int:
+            if angle_adc is None:
+                return 0
+            try:
+                # ESP32 ADC.read_u16 or read
+                if hasattr(angle_adc, "read_u16"):
+                    return int(angle_adc.read_u16() >> 4)  # ~12-bit-ish
+                return int(angle_adc.read())
+            except Exception:
+                return 0
+
+        def read_pir(self) -> int:
+            if pir_pin is None:
+                return 0
+            try:
+                return 1 if pir_pin.value() else 0
+            except Exception:
+                return 0
+
+        def write_text(self, path: str, text: str) -> None:
+            with open(path, "w") as f:
+                f.write(text)
+
+        def read_text(self, path: str):
+            try:
+                with open(path, "r") as f:
+                    return f.read()
+            except Exception:
+                return None
 
         def ticks_ms(self) -> int:
             return int(time.ticks_ms())
