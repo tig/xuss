@@ -9,7 +9,9 @@ RPM_DEFAULT = 0
 DUTY_PCT = 50
 ROUTE = "voice"  # voice | tach | both
 VOLUME = 6
-GREET = 1
+# Greet stays available (set greet 1) but default off so a floating PIR pin
+# cannot peep-loop the bench when no unit is attached.
+GREET = 0
 KNOB = 0
 MUTE = 0
 # Spec table default is 10; manners prefer quiet until host enables (0).
@@ -86,9 +88,11 @@ KNOB_ADC_MIN = 0
 KNOB_ADC_MAX = 4095
 
 # PIR debounce / re-arm
-PIR_QUIET_MS = 2000  # no human before next approach can arm
+PIR_QUIET_MS = 3000  # no human before next approach can arm
 PIR_GREET_CHIRP_MS = 120
 PIR_GREET_HZ = 880
+PIR_DEBOUNCE_TICKS = 5  # consecutive high samples before "human"
+PIR_BOOT_GRACE_MS = 5000  # ignore PIR after boot (and while riff may run)
 
 # Config image
 CONFIG_PATH = "xuss.cfg"

@@ -186,7 +186,11 @@ def make_board_hal():
         angle_adc = None
 
     try:
-        pir_pin = Pin(PIR_PIN, Pin.IN)
+        # Pull-down: floating Port C must not look like a human forever
+        try:
+            pir_pin = Pin(PIR_PIN, Pin.IN, Pin.PULL_DOWN)
+        except Exception:
+            pir_pin = Pin(PIR_PIN, Pin.IN)
     except Exception:
         pir_pin = None
 

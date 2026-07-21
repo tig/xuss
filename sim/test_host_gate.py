@@ -68,20 +68,30 @@ def test_inputs_knob_and_greet_once():
     defaults = _load("defaults")
     assert inputs.adc_to_rpm(0) == defaults.KNOB_RPM_MIN
     assert inputs.adc_to_rpm(defaults.KNOB_ADC_MAX) == defaults.KNOB_RPM_MAX
+    # start after boot grace
+    t0 = defaults.PIR_BOOT_GRACE_MS + 10
     pres = inputs.make_presence(0)
-    e1 = inputs.tick_presence(pres, 1, True, False, 100)
-    assert e1 == "greet"
-    e2 = inputs.tick_presence(pres, 1, True, False, 200)
+    # debounce: need several highs
+    e0 = None
+    for i in range(defaults.PIR_DEBOUNCE_TICKS):
+        e0 = inputs.tick_presence(pres, 1, True, False, t0 + i)
+    assert e0 == "greet"
+    e2 = inputs.tick_presence(pres, 1, True, False, t0 + 20)
     assert e2 is None  # same approach
-    inputs.tick_presence(pres, 0, True, False, 300)
-    # still in quiet window — reappearance is same approach
-    e3 = inputs.tick_presence(pres, 1, True, False, 400)
+    inputs.tick_presence(pres, 0, True, False, t0 + 30)
+    # still in quiet window
+    for i in range(defaults.PIR_DEBOUNCE_TICKS):
+        e3 = inputs.tick_presence(pres, 1, True, False, t0 + 40 + i)
     assert e3 is None
-    # leave long enough to re-arm
-    leave_at = 400 + defaults.PIR_QUIET_MS + 50
+    leave_at = t0 + 40 + defaults.PIR_QUIET_MS + 50
     inputs.tick_presence(pres, 0, True, False, leave_at)
-    e5 = inputs.tick_presence(pres, 1, True, False, leave_at + 10)
+    e5 = None
+    for i in range(defaults.PIR_DEBOUNCE_TICKS):
+        e5 = inputs.tick_presence(pres, 1, True, False, leave_at + 10 + i)
     assert e5 == "greet"
+    # boot grace: no greet
+    pres2 = inputs.make_presence(0)
+    assert inputs.tick_presence(pres2, 1, True, False, 100) is None
 
 
 def test_riff_streams_samples():

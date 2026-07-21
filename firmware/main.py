@@ -135,15 +135,15 @@ def _drive_edge(state, now_ms=None):
     eng = state["eng"]
     hal = state.get("hal")
 
-    # Boot riff owns the speaker until done (still poll serial elsewhere)
+    # Boot riff owns the speaker until done (serial still polled in tick)
     if not riff_done(state.get("riff")):
         n = riff_samples_for_tick(state["riff"], state.get("tick_sleep_ms", TICK_SLEEP_MS))
-        riff_advance(state["riff"], n, hal=hal)
-        # park engine square while riff plays
-        if hasattr(hal, "set_edge"):
-            # only tach could run during riff if route tach — keep silent both for manners
-            pass
+        still = riff_advance(state["riff"], n, hal=hal)
+        if not still and hasattr(hal, "park_outputs"):
+            # hard silence after riff — no residual LEDC buzz
+            hal.park_outputs()
         state["last_hz"] = 0.0
+        state["_was_chirp"] = False
         return 0.0
 
     # PIR greet chirp (short) when not instrument-busy
@@ -154,9 +154,16 @@ def _drive_edge(state, now_ms=None):
             if int(cfg.get("mute") or 0) == 0 and vol > 0:
                 hal.set_edge(float(pres.get("chirp_hz") or 880), 50, "voice", volume=vol)
         state["last_hz"] = float(pres.get("chirp_hz") or 0)
+        state["_was_chirp"] = True
         return state["last_hz"]
 
-    # ANGLE knob live rpm
+    # Chirp just ended: park so we do not leave 880 Hz PWM running
+    if state.get("_was_chirp"):
+        state["_was_chirp"] = False
+        if hasattr(hal, "park_outputs"):
+            hal.park_outputs()
+
+    # ANGLE knob live rpm only when enabled
     if int(cfg.get("knob") or 0) == 1 and hal is not None and hasattr(hal, "read_angle_raw"):
         raw = hal.read_angle_raw()
         rpm = adc_to_rpm(raw)
@@ -178,16 +185,22 @@ def _drive_edge(state, now_ms=None):
         elif route == "both":
             out_route = "tach"
 
-    if hasattr(hal, "set_edge"):
-        hal.set_edge(hz if hz > 0 else 0, duty, out_route, volume=vol)
-    elif hz <= 0 and hasattr(hal, "park_outputs"):
-        hal.park_outputs()
+    if hz <= 0:
+        if hasattr(hal, "park_outputs"):
+            hal.park_outputs()
+        elif hasattr(hal, "set_edge"):
+            hal.set_edge(0, duty, out_route, volume=vol)
+    elif hasattr(hal, "set_edge"):
+        hal.set_edge(hz, duty, out_route, volume=vol)
     state["last_hz"] = hz
     return hz
 
 
 def _poll_inputs(state, now_ms=None):
     t = _now(state, now_ms)
+    # No PIR while boot riff is still playing
+    if not riff_done(state.get("riff")):
+        return
     hal = state.get("hal")
     cfg = state["cfg"]
     pir = 0
