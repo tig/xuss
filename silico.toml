@@ -4,11 +4,9 @@ fw_name = "XUSS"
 fw_version = "0.0.1"
 
 [runtime]
-# Latest *stable* PyPI mpy-cross at plate ship time. After silico inspect,
-# re-pin to the device MicroPython major.minor (see AGENTS.md mpy-cross notes).
-# M5GO currently runs MicroPython 1.12 (UIFlow-era); plan is esptool → modern
-# ESP32 MicroPython before claiming an honest ABI pin.
-mpy_cross = "1.27.0.post2"
+# mpy-cross ABI: Silico owns the pin. Applied from device MicroPython after
+# esptool flash of ESP32_GENERIC v1.28.0 (COM7). Re-run apply if firmware changes.
+mpy_cross = "1.28.0rc0.post2"
 board = "m5go-v27"
 
 [host]

@@ -9,4 +9,4 @@ pytest>=8
 # mpy-cross ABI: Silico owns the pin. After the board talks:
 #   silico inspect --port COMx --apply-mpy-pin
 # Plate default is a starting point only.
-mpy-cross==1.27.0.post2
+mpy-cross==1.28.0rc0.post2
