@@ -4,7 +4,7 @@ Guidance for AI coding agents working in **xuss**.
 
 ## What this repo is
 
-A GCU (one shippable edge device) built on the [silico](https://github.com/tig/silico) spine. Read silico's AGENTS.md for the harness, the Day 1 playbook, and the plate. The pip distribution is `tig-silico`; never `pip install silico`.
+A GCU (one shippable edge device) built on the [silico](https://github.com/tig/silico) spine. Read silico's AGENTS.md for the harness, the Day 1 playbook, and the plate.
 
 ## How to work here
 
