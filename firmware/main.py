@@ -17,11 +17,10 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
     loaded = load_from_hal(hal)
     if loaded is not None:
         cfg = loaded
-    # Never load a stuck engine from a bad save
+    # Never boot into a live instrument path (floating ADC/PIR must not sing)
     cfg["rpm"] = 0
-    if "knob" in cfg:
-        # knob left on with floating ADC = endless tone; require explicit set
-        pass
+    cfg["knob"] = 0
+    cfg["greet"] = 0
 
     eng = make_engine(now_ms=now_ms)
     # Riff is one-shot in init (not streamed in the tick loop — that interleaved
@@ -79,8 +78,19 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
                 hal.dac_idle()
             except Exception:
                 pass
-    if hasattr(hal, "park_outputs"):
-        hal.park_outputs()
+    # Triple park after riff — DAC mux on ESP32 can leave the amp hot once
+    for _ in range(3):
+        if hasattr(hal, "park_outputs"):
+            try:
+                hal.park_outputs()
+            except Exception:
+                pass
+    try:
+        from hal_board import emergency_silence
+
+        emergency_silence()
+    except Exception:
+        pass
     return state
 
 

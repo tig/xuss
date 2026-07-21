@@ -49,8 +49,8 @@ def side_colors(t_ms, mode="idle"):
         return [(40, 0, 0)] * n
     dim = _scale(base, int(FACE_IDLE_DIM))
     if mode == "idle":
-        # static glow — one write at mode entry, not every 120ms
-        return [dim] * n
+        # fully off when idle — even static dim SK6812 can couple buzz into the amp
+        return [(0, 0, 0)] * n
     bright = _scale(base, int(FACE_CHASE_BRIGHT))
     idx = (int(t_ms) // int(FACE_CHASE_MS)) % n
     colors = [dim] * n

@@ -216,7 +216,11 @@ def make_board_hal():
         pir_pin = None
 
     def _spk_off():
-        """True silence: tear down DAC/PWM and drive pin low."""
+        """True silence: tear down DAC/PWM and hold pin hard low.
+
+        Dropping the DAC ref alone is not enough on ESP32 — the peripheral can
+        keep driving the amp. Rebind as GPIO OUT=0 after writing digital 0.
+        """
         if spk_pwm[0] is not None:
             try:
                 spk_pwm[0].duty_u16(0)
@@ -227,14 +231,23 @@ def make_board_hal():
             except Exception:
                 pass
             spk_pwm[0] = None
-        spk_dac[0] = None
+        if spk_dac[0] is not None:
+            try:
+                spk_dac[0].write(0)
+            except Exception:
+                pass
+            spk_dac[0] = None
         try:
+            # Re-mux pin away from DAC/LEDC onto digital GPIO
             p = Pin(SPEAKER_PIN, Pin.OUT)
+            p.value(0)
+            time.sleep_ms(5)
             p.value(0)
         except Exception:
             pass
         voice_mode[0] = "off"
         _last_spk[0] = (0.0, 0)
+        _last_edge[0] = (0.0, 0, "off", 0)
 
     def _tach_off():
         if tach_pwm[0] is not None:
@@ -429,15 +442,26 @@ def make_board_hal():
                 return
             # ~11025 Hz: ~90 us/sample
             us = max(1, int(1000000 // int(BOOT_RIFF_HZ)))
-            for b in data:
+            n = len(data)
+            # Last ~15 ms force to 0 so amp is not left mid-rail when we stop
+            fade_n = min(n, int(BOOT_RIFF_HZ * 15 // 1000))
+            for i, b in enumerate(data):
                 try:
-                    dac.write(int(b) & 0xFF)
+                    if i >= n - fade_n:
+                        dac.write(0)
+                    else:
+                        dac.write(int(b) & 0xFF)
                 except Exception:
                     break
                 time.sleep_us(us)
+            try:
+                dac.write(0)
+            except Exception:
+                pass
+            # Always hard-mute after a buffer (caller may also park)
+            _spk_off()
 
         def dac_idle(self) -> None:
-            # After sample playback: full silence (not idle PWM hum)
             _spk_off()
 
         def read_angle_raw(self) -> int:
