@@ -131,7 +131,7 @@ def test_sing_and_run_profiles_and_deadman():
     assert state["cfg"]["route"] == "tach"
     main.tick(state, now_ms=400)
     assert state["mode"] == "driving"
-    assert fake.last_edge[2] == "tach"
+    assert fake.last_edge[2] == "tach"  # route
 
     # Steady tach force (profiles can finish before the dead-man window)
     main.feed_line(state, "route tach", now_ms=500)
@@ -180,9 +180,9 @@ def test_product_path_uses_shipped_defaults():
     main.tick(state, now_ms=20)
     assert fake.last_edge is not None
     assert abs(fake.last_edge[0] - expected_hz) < 1.0
-    # shipped volume scales voice duty (stage loudness), tach keeps duty_pct
-    expect_duty = max(5, (defaults.DUTY_PCT * defaults.VOLUME) // 10)
-    assert fake.last_edge[1] == expect_duty
+    # duty stays mark-space; volume is a separate amplitude channel
+    assert fake.last_edge[1] == defaults.DUTY_PCT
+    assert fake.last_edge[3] == defaults.VOLUME
     assert state["fw_name"] and state["fw_version"]
 
 

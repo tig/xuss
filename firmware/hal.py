@@ -22,8 +22,12 @@ class Hal:
     def set_backlight(self, on: bool) -> None:
         raise NotImplementedError
 
-    def set_edge(self, hz, duty_pct, route) -> None:
-        """Square-wave engine to voice / tach / both. hz<=0 parks that sink."""
+    def set_edge(self, hz, duty_pct, route, volume=10) -> None:
+        """Square-wave engine to voice / tach / both. hz<=0 parks that sink.
+
+        ``duty_pct`` is mark-space (sensor honesty on tach). ``volume`` 0-10 is
+        voice amplitude only — never encode loudness by thinning duty.
+        """
         raise NotImplementedError
 
     def park_outputs(self) -> None:

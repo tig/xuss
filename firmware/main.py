@@ -112,52 +112,25 @@ def _drive_edge(state, now_ms=None):
         except Exception:
             cfg["rpm"] = 0
 
-    # mute parks voice sink only
+    # mute / volume 0 park voice only; tach duty stays honest mark-space
     out_route = route
-    if int(cfg.get("mute") or 0) == 1:
+    vol = int(cfg.get("volume") or 0)
+    if int(cfg.get("mute") or 0) == 1 or vol <= 0:
         if route == "voice":
             hz = 0.0
         elif route == "both":
             out_route = "tach"
-        # volume 0 also silences voice
-    vol = int(cfg.get("volume") or 0)
-    if vol <= 0 and out_route in ("voice", "both"):
-        if out_route == "voice":
-            hz = 0.0
-        else:
-            out_route = "tach"
-
-    # scale voice loudness via duty when volume < 10 (tach keeps duty_pct)
-    voice_duty = duty
-    if out_route in ("voice", "both") and vol < 10:
-        voice_duty = max(5, (duty * vol) // 10)
 
     hal = state.get("hal")
     if hal is None:
         state["last_hz"] = hz
         return hz
 
-    if hz <= 0:
-        if hasattr(hal, "park_outputs"):
-            # only park if we were forcing or always safe
-            if hasattr(hal, "set_edge"):
-                hal.set_edge(0, duty, route)
-            else:
-                hal.park_outputs()
-    else:
-        if out_route == "both":
-            # same engine both sinks — duty may differ voice vs tach by volume
-            if hasattr(hal, "set_edge"):
-                # board applies one duty; prefer tach duty for mark-space honesty
-                # and accept volume-scaled as compromise when both
-                use_duty = duty if vol >= 10 else voice_duty
-                hal.set_edge(hz, use_duty, "both")
-        elif out_route == "voice":
-            if hasattr(hal, "set_edge"):
-                hal.set_edge(hz, voice_duty, "voice")
-        else:
-            if hasattr(hal, "set_edge"):
-                hal.set_edge(hz, duty, "tach")
+    if hasattr(hal, "set_edge"):
+        # volume is amplitude on the voice sink, never a thinner duty cycle
+        hal.set_edge(hz if hz > 0 else 0, duty, out_route, volume=vol)
+    elif hz <= 0 and hasattr(hal, "park_outputs"):
+        hal.park_outputs()
     state["last_hz"] = hz
     return hz
 
@@ -182,6 +155,14 @@ def tick(state, now_ms=None):
     _poll_serial(state, t)
     if state.get("exit_repl") or state.get("do_reboot"):
         _park(state)
+        # Restore interrupt char immediately so mpremote/silico can reclaim CDC
+        if state.get("exit_repl"):
+            try:
+                import micropython
+
+                micropython.kbd_intr(3)
+            except Exception:
+                pass
         return state
     _drive_edge(state, t)
     _paint(state, t)

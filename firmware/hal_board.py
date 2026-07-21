@@ -1,6 +1,10 @@
 """Device HAL backend for M5GO — only deploy module allowed to import machine.
 
 Pin map: M5GO IoT Kit v2.7 (ILI9342C, SK6812x10@G15, SPK@G25, Port B@G26).
+
+Voice and tach are both hardware PWM (pitch-honest). Loudness is NOT encoded
+by thinning duty — that turns a square into a nasty pulse train. Volume 0 mutes
+voice; 1-10 play a clean mark-space square (default 50%).
 """
 
 from defaults import (
@@ -114,7 +118,6 @@ class _Ili9342:
 
 
 def _pwm_duty_u16(duty_pct):
-    # 0-100% -> 0-65535
     p = int(duty_pct)
     if p < 0:
         p = 0
@@ -158,37 +161,72 @@ def make_board_hal():
     except Exception:
         lcd_ok = False
 
+    # Hold Pin objects; rebuild PWM on each tune for cleaner ESP32 LEDC retune
     spk_pin = Pin(SPEAKER_PIN, Pin.OUT)
     tach_pin = Pin(TACH_PIN, Pin.OUT)
-    spk_pwm = PWM(spk_pin, freq=1000, duty_u16=0)
-    tach_pwm = PWM(tach_pin, freq=1000, duty_u16=0)
+    spk_pwm = [PWM(spk_pin, freq=1000, duty_u16=0)]
+    tach_pwm = [PWM(tach_pin, freq=1000, duty_u16=0)]
+    _last_spk = [None]
+    _last_tach = [None]
 
-    _last_face_key = [None]
-    _last_edge = [None]  # (hz, duty, route)
-
-    def _apply_pwm(pwm, hz, duty_pct):
-        if hz is None or hz <= 0:
+    def _pwm_off(slot):
+        try:
+            slot[0].duty_u16(0)
+        except Exception:
             try:
-                pwm.duty_u16(0)
+                slot[0].duty(0)
             except Exception:
-                pwm.duty(0)
+                pass
+
+    def _spk_set(hz, duty_pct):
+        key = (float(hz or 0), int(duty_pct))
+        if key == _last_spk[0]:
             return
-        ihz = int(hz)
+        _pwm_off(spk_pwm)
+        if hz is None or hz <= 0:
+            _last_spk[0] = (0.0, 0)
+            return
+        ihz = int(round(float(hz)))
         if ihz < 1:
             ihz = 1
         try:
-            pwm.freq(ihz)
-        except ValueError:
-            # out of hardware range — park this sink
             try:
-                pwm.duty_u16(0)
+                spk_pwm[0].deinit()
             except Exception:
-                pwm.duty(0)
-            return
-        try:
-            pwm.duty_u16(_pwm_duty_u16(duty_pct))
+                pass
+            # LEDC re-init avoids in-place freq glitches on ESP32
+            spk_pwm[0] = PWM(spk_pin, freq=ihz, duty_u16=0)
+            time.sleep_ms(1)
+            spk_pwm[0].duty_u16(_pwm_duty_u16(duty_pct))
+            _last_spk[0] = key
         except Exception:
-            pwm.duty(int(duty_pct * 1023 / 100))
+            _last_spk[0] = (0.0, 0)
+
+    def _tach_set(hz, duty_pct):
+        key = (float(hz or 0), int(duty_pct))
+        if key == _last_tach[0]:
+            return
+        _pwm_off(tach_pwm)
+        if hz is None or hz <= 0:
+            _last_tach[0] = (0.0, 0)
+            return
+        ihz = int(round(float(hz)))
+        if ihz < 1:
+            ihz = 1
+        try:
+            try:
+                tach_pwm[0].deinit()
+            except Exception:
+                pass
+            tach_pwm[0] = PWM(tach_pin, freq=ihz, duty_u16=0)
+            time.sleep_ms(1)
+            tach_pwm[0].duty_u16(_pwm_duty_u16(duty_pct))
+            _last_tach[0] = key
+        except Exception:
+            _last_tach[0] = (0.0, 0)
+
+    _last_face_key = [None]
+    _last_edge = [None]
 
     class BoardHal:
         def set_led(self, on: bool) -> None:
@@ -250,23 +288,32 @@ def make_board_hal():
         def set_backlight(self, on: bool) -> None:
             bl.value(1 if on else 0)
 
-        def set_edge(self, hz, duty_pct, route) -> None:
-            key = (float(hz or 0), int(duty_pct), str(route))
+        def set_edge(self, hz, duty_pct, route, volume=10) -> None:
+            key = (float(hz or 0), int(duty_pct), str(route), int(volume))
             if key == _last_edge[0]:
                 return
             _last_edge[0] = key
             hz = float(hz or 0)
             duty = int(duty_pct)
             r = str(route)
-            voice_on = r in ("voice", "both") and hz > 0
+            vol = int(volume)
+            # Voice: clean square at duty_pct (default 50). Volume is mute gate only
+            # on this beeper-class speaker (amplitude via duty sounds worse).
+            voice_on = r in ("voice", "both") and hz > 0 and vol > 0
             tach_on = r in ("tach", "both") and hz > 0
-            _apply_pwm(spk_pwm, hz if voice_on else 0, duty)
-            _apply_pwm(tach_pwm, hz if tach_on else 0, duty)
+            if voice_on:
+                _spk_set(hz, duty)
+            else:
+                _spk_set(0, 0)
+            if tach_on:
+                _tach_set(hz, duty)
+            else:
+                _tach_set(0, 0)
 
         def park_outputs(self) -> None:
-            _last_edge[0] = (0.0, 0, "park")
-            _apply_pwm(spk_pwm, 0, 0)
-            _apply_pwm(tach_pwm, 0, 0)
+            _last_edge[0] = (0.0, 0, "park", 0)
+            _spk_set(0, 0)
+            _tach_set(0, 0)
 
         def reboot(self) -> None:
             self.park_outputs()

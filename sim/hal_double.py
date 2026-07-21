@@ -31,8 +31,8 @@ class FakeHal:
     def set_backlight(self, on: bool) -> None:
         self.backlight = bool(on)
 
-    def set_edge(self, hz, duty_pct, route) -> None:
-        rec = (float(hz or 0), int(duty_pct), str(route))
+    def set_edge(self, hz, duty_pct, route, volume=10) -> None:
+        rec = (float(hz or 0), int(duty_pct), str(route), int(volume))
         self.last_edge = rec
         self.edge_history.append(rec)
 
