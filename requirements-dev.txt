@@ -1,0 +1,12 @@
+# Host-only. Package distribution name is tig-silico; CLI entry point is still `silico`.
+# Do not `pip install silico` (unrelated package on PyPI).
+#
+# Pin a git ref whose pyproject [project].name is tig-silico (this rename).
+# v0.1.3 and earlier declare name=silico and will fail as tig-silico@v0.1.3.
+# After release, prefer an immutable tag (e.g. v0.1.4+) over @main.
+tig-silico @ git+https://github.com/tig/silico.git@main
+pytest>=8
+# mpy-cross ABI: Silico owns the pin. After the board talks:
+#   silico inspect --port COMx --apply-mpy-pin
+# Plate default is a starting point only.
+mpy-cross==1.27.0.post2
