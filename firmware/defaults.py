@@ -171,11 +171,11 @@ FACE_THEMES = (
     },
     {
         "name": "black",
-        # Near-black charcoal eyes on pure black (pure 0,0,0 eyes vanish / look blank).
-        "eye": (20, 20, 20),
+        # Pure black face (no charcoal wash); sides off; banner invisible.
+        "eye": (0, 0, 0),
         "bar": (0, 0, 0),
         "bg": (0, 0, 0),
-        "banner_fg": (0, 0, 0),  # no marquee glow
+        "banner_fg": (0, 0, 0),
         "side": (0, 0, 0),  # off
     },
 )

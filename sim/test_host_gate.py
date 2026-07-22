@@ -127,13 +127,13 @@ def test_themes_cycle_and_black_sides_off():
     fr_o = face.frame(0, mode="idle", theme_idx=1)
     assert fr_o["theme_name"] == "orange"
     assert fr_o["eye_color"][0] > fr_o["eye_color"][1] > fr_o["eye_color"][2]
-    # Black: side LEDs fully off; face stays dark (not washed white)
+    # Black: side LEDs fully off; pure black face (not light gray)
     fr_b = face.frame(0, mode="idle", theme_idx=4)
     assert fr_b["theme_name"] == "black"
     assert all(c == (0, 0, 0) for c in fr_b["side"])
     assert fr_b["bg_color"] == (0, 0, 0)
+    assert fr_b["eye_color"] == (0, 0, 0)
     assert fr_b["banner_fg"] == (0, 0, 0)
-    assert max(fr_b["eye_color"]) <= 32
     assert face.next_theme_index(4) == 0
 
 
@@ -278,16 +278,23 @@ def test_left_button_cycles_theme_and_side_leds():
 
 
 def test_lcd_rgb565_swaps_for_bgr_panel():
-    """M5GO MADCTL BGR: blue-heavy RGB must not pack as orange-heavy wire word."""
+    """M5GO MADCTL BGR + little-endian SPI bytes."""
     hb = _load("hal_board")
-    # Pure blue (0,0,255) → BGR panel wire puts blue in the high (R) bits
+    # Pure blue (0,0,255) → BGR pack puts blue in the high (R) bits of the word
     wire = hb._rgb565(0, 0, 255)
     assert (wire >> 11) >= 0x1F
     wire_r = hb._rgb565(255, 0, 0)
     assert (wire_r & 0x1F) >= 0x1F
-    # Naive RGB pack of blue would put blue in low bits — we must not match that
     naive_blue = ((0 & 0xF8) << 8) | ((0 & 0xFC) << 3) | (255 >> 3)
     assert wire != naive_blue
+    # SPI order is lo, hi (M5 setSwapBytes) — BE made red→yellow, green→purple
+    lo, hi = hb._rgb565_bytes(255, 0, 0)
+    assert (lo, hi) == (wire_r & 0xFF, (wire_r >> 8) & 0xFF)
+    assert (lo, hi) != ((wire_r >> 8) & 0xFF, wire_r & 0xFF)
+    wire_g = hb._rgb565(0, 255, 0)
+    lo_g, hi_g = hb._rgb565_bytes(0, 255, 0)
+    assert (lo_g, hi_g) == (wire_g & 0xFF, (wire_g >> 8) & 0xFF)
+    assert (lo_g, hi_g) != ((wire_g >> 8) & 0xFF, wire_g & 0xFF)
 
 
 def test_riff_streams_samples():
