@@ -277,24 +277,20 @@ def test_left_button_cycles_theme_and_side_leds():
     assert state["theme_idx"] == 0
 
 
-def test_lcd_rgb565_swaps_for_bgr_panel():
-    """M5GO MADCTL BGR + little-endian SPI bytes."""
+def test_lcd_rgb565_matches_led_rgb_intent():
+    """IPS packing must match NeoPixel RGB (standard RGB565, BE wire)."""
     hb = _load("hal_board")
-    # Pure blue (0,0,255) → BGR pack puts blue in the high (R) bits of the word
-    wire = hb._rgb565(0, 0, 255)
-    assert (wire >> 11) >= 0x1F
-    wire_r = hb._rgb565(255, 0, 0)
-    assert (wire_r & 0x1F) >= 0x1F
-    naive_blue = ((0 & 0xF8) << 8) | ((0 & 0xFC) << 3) | (255 >> 3)
-    assert wire != naive_blue
-    # SPI order is lo, hi (M5 setSwapBytes) — BE made red→yellow, green→purple
-    lo, hi = hb._rgb565_bytes(255, 0, 0)
-    assert (lo, hi) == (wire_r & 0xFF, (wire_r >> 8) & 0xFF)
-    assert (lo, hi) != ((wire_r >> 8) & 0xFF, wire_r & 0xFF)
-    wire_g = hb._rgb565(0, 255, 0)
-    lo_g, hi_g = hb._rgb565_bytes(0, 255, 0)
-    assert (lo_g, hi_g) == (wire_g & 0xFF, (wire_g >> 8) & 0xFF)
-    assert (lo_g, hi_g) != ((wire_g >> 8) & 0xFF, wire_g & 0xFF)
+    # Pure primaries in standard RGB565
+    assert hb._rgb565(255, 0, 0) == 0xF800  # red in high bits
+    assert hb._rgb565(0, 255, 0) == 0x07E0
+    assert hb._rgb565(0, 0, 255) == 0x001F
+    # SPI big-endian: hi byte first
+    hi, lo = hb._rgb565_bytes(255, 0, 0)
+    assert (hi, lo) == (0xF8, 0x00)
+    hi_g, lo_g = hb._rgb565_bytes(0, 255, 0)
+    assert (hi_g, lo_g) == (0x07, 0xE0)
+    hi_b, lo_b = hb._rgb565_bytes(0, 0, 255)
+    assert (hi_b, lo_b) == (0x00, 0x1F)
 
 
 def test_riff_streams_samples():

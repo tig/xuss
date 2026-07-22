@@ -36,31 +36,22 @@ from defaults import (
 
 
 def _rgb565(r, g, b):
-    """Pack operator RGB into a 16-bit color for the M5GO panel.
+    """Pack operator RGB into standard RGB565 (same intent as NeoPixel RGB).
 
-    MADCTL BGR (0x36 = 0x08): R/B channels are swapped relative to plain
-    RGB565 so human RGB intent matches the glass.
-
-    SPI wire order is **little-endian** (low byte first) — same as M5
-    ``setSwapBytes(true)``. Sending high-byte first made pure red read as
-    yellow and pure green as purple on this IPS.
+    MADCTL is set for **RGB** (not BGR). SPI sends the 16-bit color
+    big-endian (high byte first), which is the common ILI934x path and
+    matches the side-LED RGB values the operator already confirmed.
     """
     r = int(r) & 0xFF
     g = int(g) & 0xFF
     b = int(b) & 0xFF
-    return ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 
 def _rgb565_bytes(r, g, b):
-    """Two SPI bytes (lo, hi) for one pixel."""
+    """Two SPI bytes (hi, lo) — big-endian RGB565 on the wire."""
     c = _rgb565(r, g, b)
-    return (c & 0xFF), ((c >> 8) & 0xFF)
-
-
-def _color565_to_le_bytes(color565):
-    """Split a packed 565 word into SPI little-endian byte pair."""
-    c = int(color565) & 0xFFFF
-    return (c & 0xFF), ((c >> 8) & 0xFF)
+    return ((c >> 8) & 0xFF), (c & 0xFF)
 
 
 class _Ili9342:
@@ -105,9 +96,11 @@ class _Ili9342:
         self._cmd(0x11)
         time.sleep_ms(120)
         self._cmd(0x3A)
-        self._data_byte(0x55)
+        self._data_byte(0x55)  # 16-bit pixel
         self._cmd(0x36)
-        self._data_byte(0x08)
+        # MADCTL: RGB order (bit3 BGR=0). Prior 0x08 BGR + channel hacks
+        # desynced the IPS from the SK6812s (LEDs were correct; face was not).
+        self._data_byte(0x00)
         self._cmd(0x29)
         time.sleep_ms(20)
         self.bl.value(1)
@@ -128,12 +121,12 @@ class _Ili9342:
         y1 = min(self.height - 1, y0 + int(h) - 1)
         if x1 < x0 or y1 < y0:
             return
-        lo, hi = _rgb565_bytes(*color_rgb)
+        hi, lo = _rgb565_bytes(*color_rgb)
         row_w = x1 - x0 + 1
         row = bytearray(row_w * 2)
         for i in range(row_w):
-            row[i * 2] = lo
-            row[i * 2 + 1] = hi
+            row[i * 2] = hi
+            row[i * 2 + 1] = lo
         self._window(x0, y0, x1, y1)
         self.dc.value(1)
         self.cs.value(0)
@@ -147,9 +140,8 @@ class _Ili9342:
     def blit_rgb565(self, x, y, w, h, buf):
         """One window + one SPI write for a precomposed RGB565 rectangle.
 
-        ``buf`` is row-major **little-endian** RGB565 (lo, hi per pixel),
-        length >= w*h*2. Used by the hair-bar marquee so scroll frames never
-        flash a clear-then-draw.
+        ``buf`` is row-major **big-endian** RGB565 (hi, lo per pixel),
+        length >= w*h*2. Same packing as fill_rect / NeoPixel RGB intent.
         """
         if w <= 0 or h <= 0 or buf is None:
             return
@@ -161,14 +153,12 @@ class _Ili9342:
         y1 = min(self.height - 1, y0 + h - 1)
         if x1 < x0 or y1 < y0:
             return
-        # Expect exact bar-sized buffer at origin; partial blit not required.
         need = w * h * 2
         if len(buf) < need:
             return
         self._window(x0, y0, x1, y1)
         self.dc.value(1)
         self.cs.value(0)
-        # MicroPython SPI accepts memoryview / bytearray in one transfer.
         self.spi.write(buf if len(buf) == need else memoryview(buf)[:need])
         self.cs.value(1)
 

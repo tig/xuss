@@ -118,25 +118,25 @@ def glyph(ch):
 
 
 def pack_rgb565_panel(r, g, b):
-    """RGB → panel 565 word (M5GO MADCTL BGR: swap R/B). SPI uses LE bytes."""
+    """RGB → standard RGB565 word (matches NeoPixel / face theme RGB)."""
     r = int(r) & 0xFF
     g = int(g) & 0xFF
     b = int(b) & 0xFF
-    return ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 
-def _le_bytes(color565):
-    """Little-endian byte pair for SPI (M5 setSwapBytes / ILI9342 path)."""
+def _be_bytes(color565):
+    """Big-endian byte pair for SPI (hi, lo)."""
     c = int(color565) & 0xFFFF
-    return (c & 0xFF), ((c >> 8) & 0xFF)
+    return ((c >> 8) & 0xFF), (c & 0xFF)
 
 
 def _fill_buf_solid(buf, w, h, color565):
-    lo, hi = _le_bytes(color565)
+    hi, lo = _be_bytes(color565)
     line = bytearray(w * 2)
     for i in range(w):
-        line[i * 2] = lo
-        line[i * 2 + 1] = hi
+        line[i * 2] = hi
+        line[i * 2 + 1] = lo
     row_bytes = w * 2
     for y in range(h):
         buf[y * row_bytes : (y + 1) * row_bytes] = line
@@ -152,14 +152,14 @@ def _fill_buf_rect(buf, w, h, x, y, rw, rh, color565):
     y1 = y + rh if y + rh < h else h
     if x1 <= x0 or y1 <= y0:
         return
-    lo, hi = _le_bytes(color565)
+    hi, lo = _be_bytes(color565)
     row_bytes = w * 2
     for yy in range(y0, y1):
         base = yy * row_bytes
         for xx in range(x0, x1):
             i = base + xx * 2
-            buf[i] = lo
-            buf[i + 1] = hi
+            buf[i] = hi
+            buf[i + 1] = lo
 
 
 def compose_banner_buf(buf, w, h, text, x0, bar_rgb, fg_rgb, pack_fn=None):
