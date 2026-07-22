@@ -111,6 +111,19 @@ def test_idle_face_is_blue_and_side_leds_on():
     assert c0[2] >= c0[0] and c0[2] >= c0[1]
 
 
+def test_lcd_rgb565_swaps_for_bgr_panel():
+    """M5GO MADCTL BGR: blue-heavy RGB must not pack as orange-heavy wire word."""
+    hb = _load("hal_board")
+    # Pure blue (0,0,255) → BGR panel wire puts blue in the high (R) bits
+    wire = hb._rgb565(0, 0, 255)
+    assert (wire >> 11) >= 0x1F
+    wire_r = hb._rgb565(255, 0, 0)
+    assert (wire_r & 0x1F) >= 0x1F
+    # Naive RGB pack of blue would put blue in low bits — we must not match that
+    naive_blue = ((0 & 0xF8) << 8) | ((0 & 0xFC) << 3) | (255 >> 3)
+    assert wire != naive_blue
+
+
 def test_riff_streams_samples():
     riff_mod = _load("riff")
     fake = _load_sim("hal_double").FakeHal()

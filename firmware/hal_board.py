@@ -35,7 +35,16 @@ from defaults import (
 
 
 def _rgb565(r, g, b):
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+    """Pack operator RGB into panel wire order.
+
+    M5GO ILI9342C is brought up with MADCTL BGR (0x36 = 0x08). Feeding
+    RGB565 as-is swaps red and blue on the glass — blues look orange.
+    Swap R/B here so defaults FACE_*_COLOR stay natural RGB for humans.
+    """
+    r = int(r) & 0xFF
+    g = int(g) & 0xFF
+    b = int(b) & 0xFF
+    return ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)
 
 
 class _Ili9342:
