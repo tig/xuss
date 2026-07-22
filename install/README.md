@@ -29,10 +29,11 @@ After first-flash, app updates are mpremote/`silico deploy` only — no re-teach
 
 | Signal | Meaning |
 |--------|---------|
-| `silico inspect --port COM7` → `XUSS 0.0.1` | Host and device identity match |
+| `silico inspect --port COM7` → `XUSS 0.1.0` (or current `FW_VERSION`) | Host and device identity match |
 | Host gates green | `pytest -q`, `silico gate`, `silico product-path` |
+| Link answers `identity` | `fw_name=XUSS fw_version=…` on the serial line |
 
-**Honest metal note:** the plate hello-metal toggles `LED_PIN` from `firmware/defaults.py` (currently 16, XIAO-era). On M5GO that pin is **not** a documented front-face LED; visible face/side-LED/boot-riff behavior is domain work from `spec.md`, not claimed done by this plate blink.
+**Honest metal note:** L0 proves protocol, edge math, config, and escape hatch on the host double. On M5GO, PWM edge on `VOICE_PIN`/`TACH_PIN` is best-effort; L1 pitch/frequency rows still need an external instrument (spec §6.4). Face/side LEDs and boot riff DAC remain open (issue #5 / later slices).
 
 ## Dry plan (no write)
 

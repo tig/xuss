@@ -1,7 +1,7 @@
 [product]
 name = "Xuss"
 fw_name = "XUSS"
-fw_version = "0.0.1"
+fw_version = "0.1.0"
 
 [runtime]
 # Latest *stable* PyPI mpy-cross at plate ship time. After silico inspect,
@@ -26,6 +26,9 @@ allow_machine = ["hal_board"]
 core = [
   "firmware/version.py",
   "firmware/defaults.py",
+  "firmware/edge.py",
+  "firmware/config.py",
+  "firmware/protocol.py",
   "firmware/hal.py",
   "firmware/hal_board.py",
   "firmware/main.py",
