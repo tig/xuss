@@ -114,14 +114,26 @@ def test_themes_cycle_and_black_sides_off():
     defaults = _load("defaults")
     names = [t["name"] for t in defaults.FACE_THEMES]
     assert names == ["blue", "orange", "red", "green", "black"]
-    # Orange has red-dominant eye
+    # Pure primaries (muddy mixes looked pink/teal on SK6812)
+    fr_r = face.frame(0, mode="idle", theme_idx=2)
+    assert fr_r["theme_name"] == "red"
+    assert fr_r["eye_color"] == (255, 0, 0)
+    assert fr_r["side"][0][0] > 0 and fr_r["side"][0][1] == 0 and fr_r["side"][0][2] == 0
+    fr_g = face.frame(0, mode="idle", theme_idx=3)
+    assert fr_g["theme_name"] == "green"
+    assert fr_g["eye_color"] == (0, 255, 0)
+    assert fr_g["side"][0][1] > 0 and fr_g["side"][0][0] == 0 and fr_g["side"][0][2] == 0
+    # Orange has red-dominant eye, zero blue
     fr_o = face.frame(0, mode="idle", theme_idx=1)
     assert fr_o["theme_name"] == "orange"
-    assert fr_o["eye_color"][0] > fr_o["eye_color"][2]
-    # Black: side LEDs fully off
+    assert fr_o["eye_color"][0] > fr_o["eye_color"][1] > fr_o["eye_color"][2]
+    # Black: side LEDs fully off; face stays dark (not washed white)
     fr_b = face.frame(0, mode="idle", theme_idx=4)
     assert fr_b["theme_name"] == "black"
     assert all(c == (0, 0, 0) for c in fr_b["side"])
+    assert fr_b["bg_color"] == (0, 0, 0)
+    assert fr_b["banner_fg"] == (0, 0, 0)
+    assert max(fr_b["eye_color"]) <= 32
     assert face.next_theme_index(4) == 0
 
 
@@ -243,7 +255,8 @@ def test_left_button_cycles_theme_and_side_leds():
     assert state["theme_idx"] == 1
     assert any("theme=orange" in x for x in link.out)
     assert fake.last_side is not None
-    assert fake.last_side[0][0] > fake.last_side[0][2]  # orange-ish
+    # Orange primary: R high, B zero (after idle dim still pure channel)
+    assert fake.last_side[0][0] > 0 and fake.last_side[0][2] == 0
     # Holding must not re-fire
     main.tick(state, now_ms=1100)
     assert state["theme_idx"] == 1

@@ -120,10 +120,10 @@ FACE_SING_COLOR = (90, 190, 255)  # singing — bright blue (was orange)
 FACE_DRIVE_COLOR = (20, 90, 230)  # driving DUT — deep blue (was green)
 FACE_BG_COLOR = (0, 0, 20)
 FACE_BAR_COLOR = (0, 50, 120)  # top status bar / hair when idle
-# Idle side strip: static dim (paint once). Fully off hid the product face LEDs;
-# chase is reserved for singing/driving to limit SK6812 bit-bang amp coupling.
-FACE_IDLE_DIM = 48
-FACE_CHASE_BRIGHT = 140
+# Idle side strip: static dim (paint once). Higher dim keeps pure primaries true.
+# Chase is reserved for singing/driving to limit SK6812 bit-bang amp coupling.
+FACE_IDLE_DIM = 90
+FACE_CHASE_BRIGHT = 200
 FACE_IDLE_SIDE_ON = 1  # 0 = all-off idle strip (legacy silence-first)
 # Hair-bar marquee (time-based scroll, right → left).
 FACE_BANNER_TEXT = "Xuss; built with Silico"
@@ -133,46 +133,49 @@ FACE_BANNER_SCALE = 2  # 5x7 font → 10x14 in the 28px bar
 FACE_BANNER_BAR_H = 28
 FACE_BANNER_FG = (200, 230, 255)  # light blue on dark hair
 # Left-button color cycle (Button A). Side LEDs match; black = side off.
-# Each row: name, eye, bar, bg, banner_fg, side (side black ⇒ all-off).
+# Use pure primaries for eye/side — muddy mixes (e.g. red 255,48,48) read as
+# pink on SK6812 and yellow/teal washes on the IPS.
+# side (0,0,0) ⇒ fully off. Black theme: dark face, no banner, sides off.
 FACE_THEMES = (
     {
         "name": "blue",
-        "eye": (40, 140, 255),
-        "bar": (0, 50, 120),
-        "bg": (0, 0, 20),
-        "banner_fg": (200, 230, 255),
-        "side": (40, 140, 255),
+        "eye": (0, 120, 255),
+        "bar": (0, 40, 140),
+        "bg": (0, 0, 24),
+        "banner_fg": (180, 220, 255),
+        "side": (0, 100, 255),
     },
     {
         "name": "orange",
-        "eye": (255, 140, 0),
-        "bar": (140, 60, 0),
-        "bg": (20, 8, 0),
-        "banner_fg": (255, 220, 160),
-        "side": (255, 140, 0),
+        "eye": (255, 100, 0),
+        "bar": (160, 50, 0),
+        "bg": (24, 8, 0),
+        "banner_fg": (255, 200, 120),
+        "side": (255, 90, 0),
     },
     {
         "name": "red",
-        "eye": (255, 48, 48),
-        "bar": (120, 0, 0),
-        "bg": (16, 0, 0),
-        "banner_fg": (255, 180, 180),
-        "side": (255, 48, 48),
+        "eye": (255, 0, 0),
+        "bar": (140, 0, 0),
+        "bg": (24, 0, 0),
+        "banner_fg": (255, 120, 120),
+        "side": (255, 0, 0),
     },
     {
         "name": "green",
-        "eye": (40, 220, 80),
-        "bar": (0, 90, 40),
-        "bg": (0, 16, 0),
-        "banner_fg": (180, 255, 200),
-        "side": (40, 220, 80),
+        "eye": (0, 255, 0),
+        "bar": (0, 120, 0),
+        "bg": (0, 20, 0),
+        "banner_fg": (120, 255, 120),
+        "side": (0, 255, 0),
     },
     {
         "name": "black",
-        "eye": (0, 0, 0),
+        # Near-black charcoal eyes on pure black (pure 0,0,0 eyes vanish / look blank).
+        "eye": (20, 20, 20),
         "bar": (0, 0, 0),
         "bg": (0, 0, 0),
-        "banner_fg": (28, 28, 28),
+        "banner_fg": (0, 0, 0),  # no marquee glow
         "side": (0, 0, 0),  # off
     },
 )

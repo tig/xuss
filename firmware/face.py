@@ -133,6 +133,17 @@ def frame(t_ms, mode="idle", identity="XUSS", theme_idx=None):
     theme = theme_at(theme_idx)
     left, right = eye_state(t_ms, mode=mode)
     eye = _base_color(mode, theme)
+    # Use explicit None checks — never `x or default` on RGB tuples (would
+    # wrongly reject (0,0,0) if we ever stored channels alone).
+    bar = theme.get("bar")
+    if bar is None:
+        bar = (0, 50, 120)
+    bg = theme.get("bg")
+    if bg is None:
+        bg = (0, 0, 20)
+    banner_fg = theme.get("banner_fg")
+    if banner_fg is None:
+        banner_fg = (200, 230, 255)
     return {
         "mode": mode,
         "identity": identity,
@@ -145,8 +156,8 @@ def frame(t_ms, mode="idle", identity="XUSS", theme_idx=None):
         "theme_idx": int(theme_idx) % theme_count() if theme_count() else 0,
         "theme_name": theme.get("name"),
         "eye_color": eye,
-        "bar_color": theme.get("bar") or (0, 50, 120),
-        "bg_color": theme.get("bg") or (0, 0, 20),
-        "banner_fg": theme.get("banner_fg") or (200, 230, 255),
+        "bar_color": bar,
+        "bg_color": bg,
+        "banner_fg": banner_fg,
         "t_ms": int(t_ms),
     }
