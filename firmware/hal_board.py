@@ -206,6 +206,22 @@ def make_board_hal():
 
     # Absolute silence before any peripheral brings the amp up
     emergency_silence()
+    # Ensure DAC channel is free if a prior partial init left it claimed.
+    try:
+        _d = DAC(SPEAKER_PIN)
+        try:
+            _d.deinit()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            _d = DAC(Pin(SPEAKER_PIN))
+            try:
+                _d.deinit()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     # Buttons A/B — active low, external pull-ups (GPIO39/38 input-only).
     try:
@@ -283,8 +299,8 @@ def make_board_hal():
     def _spk_off():
         """True silence: tear down DAC/PWM and hold pin hard low.
 
-        Dropping the DAC ref alone is not enough on ESP32 — the peripheral can
-        keep driving the amp. Rebind as GPIO OUT=0 after writing digital 0.
+        ESP32 DAC must be deinit()'d or the next DAC() raises
+        ESP_ERR_INVALID_STATE (-259) and song playback goes silent.
         """
         if spk_pwm[0] is not None:
             try:
@@ -299,6 +315,10 @@ def make_board_hal():
         if spk_dac[0] is not None:
             try:
                 spk_dac[0].write(0)
+            except Exception:
+                pass
+            try:
+                spk_dac[0].deinit()
             except Exception:
                 pass
             spk_dac[0] = None
@@ -338,11 +358,15 @@ def make_board_hal():
             return
         _spk_off()
         try:
-            spk_dac[0] = DAC(Pin(SPEAKER_PIN))
+            # Pin number form is more reliable after GPIO remux on some MP builds.
+            try:
+                spk_dac[0] = DAC(SPEAKER_PIN)
+            except TypeError:
+                spk_dac[0] = DAC(Pin(SPEAKER_PIN))
             spk_dac[0].write(128)
         except Exception:
             spk_dac[0] = None
-        voice_mode[0] = "dac"
+        voice_mode[0] = "dac" if spk_dac[0] is not None else "off"
         _last_spk[0] = None
 
     def _spk_set(hz, duty_pct):

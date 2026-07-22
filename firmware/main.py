@@ -157,8 +157,12 @@ def _toggle_first_song(state):
 
     try:
         result = hal.play_pcm_file(path, stop_reader=_stop_reader)
-    except Exception:
+    except Exception as e:
         result = "error"
+        try:
+            _emit(state, "song=exc %s" % e)
+        except Exception:
+            pass
     state["song_playing"] = False
     _emit(state, "song=%s" % (result or "done"))
     # Re-arm button edge after a stop press that may still be held.
@@ -421,6 +425,11 @@ def tick(state, now_ms=None):
                 micropython.kbd_intr(3)
             except Exception:
                 pass
+        return state
+    # Serial `song` command (same path as Button B).
+    if state.get("song_request"):
+        state["song_request"] = False
+        _toggle_first_song(state)
         return state
     _poll_inputs(state, t)
     _drive_edge(state, t)

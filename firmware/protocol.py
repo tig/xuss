@@ -124,6 +124,11 @@ def handle_line(state, line, now_ms):
         # announce DUT actuation (spec §5)
         return ["run=%s" % name, "actuate=tach"]
 
+    if cmd == "song":
+        # Middle-button equivalent: play/stop *First* (main runs it after reply).
+        state["song_request"] = True
+        return [_ok("song")]
+
     if cmd == "repl":
         state["exit_repl"] = True
         return [_ok("repl")]
@@ -133,3 +138,4 @@ def handle_line(state, line, now_ms):
         return [_ok("reboot")]
 
     return [_err("cmd")]
+
