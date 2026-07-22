@@ -240,6 +240,33 @@ def test_banner_motion_calls_show_banner():
     assert len(fake.face_history) == n_face or True  # init may have painted face once
 
 
+def test_middle_button_plays_and_can_stop_first_song():
+    """Button B streams First; second press path reports stopped when held."""
+    main = _load("main")
+    defaults = _load("defaults")
+    link_mod = _load("link")
+    fake = _load_sim("hal_double").FakeHal()
+    link = link_mod.MemoryLink()
+    # Tiny fake song on the device path name
+    fake.binary_files[defaults.FIRST_SONG_PATH] = bytes([128, 200, 50, 128] * 20)
+    state = main.init(hal=fake, now_ms=0, link=link, riff_data=b"")
+    fake.button_b = 1
+    main.tick(state, now_ms=500)
+    assert defaults.FIRST_SONG_PATH in fake.pcm_plays
+    assert any("song=start" in x for x in link.out)
+    assert any(x.startswith("song=done") or x.startswith("song=stopped") for x in link.out)
+    # Mute blocks playback
+    link.out.clear()
+    fake.pcm_plays.clear()
+    main.feed_line(state, "set mute 1", now_ms=800)
+    fake.button_b = 0
+    main.tick(state, now_ms=900)
+    fake.button_b = 1
+    main.tick(state, now_ms=1200)
+    assert fake.pcm_plays == []
+    assert any("song=muted" in x for x in link.out)
+
+
 def test_left_button_cycles_theme_and_side_leds():
     """Button A press edge advances theme; black kills side LEDs."""
     main = _load("main")

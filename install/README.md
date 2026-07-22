@@ -6,17 +6,21 @@
 python -m pytest -q
 silico deploy --port COM7 --yes --verify --reset
 mpremote connect COM7 cp assets/boot-riff.u8.raw :boot_riff.u8.raw
+mpremote connect COM7 cp assets/first.u8.raw :first.u8.raw
 ```
 
-(Or one soft reboot after both writes.) Confirm board identity before `--yes`.
+(Or one soft reboot after writes.) Confirm board identity before `--yes`.
 
-**Good on metal:** `identity` answers `fw_name=XUSS`; side LEDs chase; boot riff once after power; `rpm 750` sings; `repl` opens the door for redeploy.
+**Good on metal:** `identity` answers `fw_name=XUSS`; side LEDs match theme; boot riff once after power; **middle button** plays *First* (press again to stop); `rpm 750` sings; `repl` opens the door for redeploy.
 
 ## Hardware map (v0.3)
 
 | Function | Pin / port |
 |----------|------------|
 | Speaker | G25 |
+| Button A (left) — color theme | G39 |
+| Button B (middle) — *First* play/stop | G38 |
+| Button C (right) | G37 |
 | Tach edge (Port B yellow) | G26 |
 | ANGLE ADC (Port B white) | G36 |
 | PIR (Port C yellow) | G17 |

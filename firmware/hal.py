@@ -53,6 +53,14 @@ class Hal:
         """1 if left front button (Button A) is pressed, else 0."""
         return 0
 
+    def read_button_b(self) -> int:
+        """1 if middle front button (Button B) is pressed, else 0."""
+        return 0
+
+    def play_pcm_file(self, path, stop_reader=None, sample_hz=None, chunk=None) -> str:
+        """Stream u8 mono PCM from path. Return done|stopped|missing|error."""
+        return "missing"
+
     def write_text(self, path: str, text: str) -> None:
         raise NotImplementedError
 

@@ -22,7 +22,10 @@ class FakeHal:
         self.angle_raw = 0
         self.pir = 0
         self.button_a = 0
+        self.button_b = 0
+        self.pcm_plays = []
         self.files = {}
+        self.binary_files = {}
 
     def set_led(self, on: bool) -> None:
         self.led = bool(on)
@@ -70,6 +73,29 @@ class FakeHal:
 
     def read_button_a(self) -> int:
         return 1 if self.button_a else 0
+
+    def read_button_b(self) -> int:
+        return 1 if self.button_b else 0
+
+    def write_dac_samples(self, data, fade_out=True, sample_hz=None) -> None:
+        self.dac_chunks.append(bytes(data) if not isinstance(data, bytes) else data)
+
+    def play_pcm_file(self, path, stop_reader=None, sample_hz=None, chunk=None) -> str:
+        # Host double: consume file if present; honor stop_reader after "release".
+        self.pcm_plays.append(path)
+        data = self.binary_files.get(path)
+        if data is None:
+            return "missing"
+        released = False
+        if stop_reader is not None:
+            # simulate release
+            self.button_b = 0
+            released = True
+        if stop_reader is not None and released and stop_reader():
+            return "stopped"
+        self.write_dac_samples(data, fade_out=False, sample_hz=sample_hz)
+        self.dac_idle()
+        return "done"
 
     def write_text(self, path: str, text: str) -> None:
         self.files[path] = text

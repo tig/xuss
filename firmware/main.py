@@ -1,7 +1,13 @@
 """Boot entry: init + tick. Host-import safe — no machine in this module."""
 
 from config import factory as config_factory, set_param
-from defaults import FACE_THEME_DEFAULT, SERIAL_IN_BUDGET, SERIAL_OUT_BUDGET, TICK_SLEEP_MS
+from defaults import (
+    FACE_THEME_DEFAULT,
+    FIRST_SONG_PATH,
+    SERIAL_IN_BUDGET,
+    SERIAL_OUT_BUDGET,
+    TICK_SLEEP_MS,
+)
 from engine import face_mode, make_engine, set_rpm, tick_engine
 from face import frame as face_frame
 from face import next_theme_index
@@ -61,6 +67,8 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
         "audio_on": False,
         "theme_idx": int(FACE_THEME_DEFAULT),
         "btn_a": make_button(now_ms),
+        "btn_b": make_button(now_ms),
+        "song_playing": False,
     }
     if hal is not None and hasattr(hal, "set_backlight"):
         hal.set_backlight(True)
@@ -117,6 +125,45 @@ def _device_or_host_riff(hal):
     except Exception:
         pass
     return load_riff_bytes()
+
+
+def _toggle_first_song(state):
+    """Button B: start *First* if idle; while playing, second press stops (in HAL)."""
+    hal = state.get("hal")
+    cfg = state.get("cfg") or {}
+    if int(cfg.get("mute") or 0) == 1:
+        _emit(state, "song=muted")
+        return
+    if hal is None or not hasattr(hal, "play_pcm_file"):
+        _emit(state, "song=no_hal")
+        return
+    # Park square-wave engine so DAC owns the amp.
+    if hasattr(hal, "park_outputs"):
+        try:
+            hal.park_outputs()
+        except Exception:
+            pass
+    path = FIRST_SONG_PATH
+    _emit(state, "song=start path=%s" % path)
+    state["song_playing"] = True
+
+    def _stop_reader():
+        if hasattr(hal, "read_button_b"):
+            try:
+                return 1 if hal.read_button_b() else 0
+            except Exception:
+                return 0
+        return 0
+
+    try:
+        result = hal.play_pcm_file(path, stop_reader=_stop_reader)
+    except Exception:
+        result = "error"
+    state["song_playing"] = False
+    _emit(state, "song=%s" % (result or "done"))
+    # Re-arm button edge after a stop press that may still be held.
+    if "btn_b" in state:
+        state["btn_b"]["down"] = 1 if _stop_reader() else 0
 
 
 def _emit(state, line):
@@ -311,6 +358,18 @@ def _poll_inputs(state, now_ms=None):
         except Exception:
             name = str(state["theme_idx"])
         _emit(state, "theme=%s idx=%s" % (name, state["theme_idx"]))
+
+    # Middle button (Button B): toggle full *First* song.
+    if "btn_b" not in state:
+        state["btn_b"] = make_button(t)
+    pressed_b = 0
+    if hal is not None and hasattr(hal, "read_button_b"):
+        try:
+            pressed_b = 1 if hal.read_button_b() else 0
+        except Exception:
+            pressed_b = 0
+    if tick_button_press(state["btn_b"], pressed_b, t):
+        _toggle_first_song(state)
 
     # Skip PIR work entirely when greet disabled (floating pin cannot peep)
     if int(cfg.get("greet") or 0) != 1:

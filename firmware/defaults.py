@@ -58,7 +58,8 @@ PROFILES = {
 # --- M5GO pins (docs.m5stack.com M5GO v2.7) ---
 SIDE_LED_PIN = 15
 SIDE_LED_COUNT = 10
-# Front buttons (active-low, external pull-ups). Left = Button A.
+# Front buttons (active-low, external pull-ups).
+# A = left (theme), B = middle (First song toggle), C = right (reserved).
 BUTTON_A_PIN = 39
 BUTTON_B_PIN = 38
 BUTTON_C_PIN = 37
@@ -89,6 +90,11 @@ BOOT_RIFF_FADE_MS = 400
 BOOT_RIFF_HOLD_MID_MS = 50
 # Host path relative to repo root for tests
 BOOT_RIFF_HOST = "assets/boot-riff.u8.raw"
+# Full *First* song (Button B toggle). Same format as boot riff; stream from FS.
+FIRST_SONG_PATH = "first.u8.raw"
+FIRST_SONG_HOST = "assets/first.u8.raw"
+FIRST_SONG_HZ = 11025
+FIRST_SONG_CHUNK = 1024  # samples per read (~93 ms); button polled between chunks
 
 # ANGLE: map ADC raw-ish 0..4095 (ESP32) to rpm
 KNOB_RPM_MIN = 0

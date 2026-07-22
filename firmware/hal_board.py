@@ -13,6 +13,7 @@ from defaults import (
     BOOT_RIFF_HOLD_MID_MS,
     BOOT_RIFF_HZ,
     BUTTON_A_PIN,
+    BUTTON_B_PIN,
     FACE_BG_COLOR,
     FACE_DRIVE_COLOR,
     FACE_EYE_COLOR,
@@ -206,11 +207,15 @@ def make_board_hal():
     # Absolute silence before any peripheral brings the amp up
     emergency_silence()
 
-    # Button A (left) — active low, external pull-up on M5GO (GPIO39 input-only).
+    # Buttons A/B — active low, external pull-ups (GPIO39/38 input-only).
     try:
         btn_a = Pin(int(BUTTON_A_PIN), Pin.IN)
     except Exception:
         btn_a = None
+    try:
+        btn_b = Pin(int(BUTTON_B_PIN), Pin.IN)
+    except Exception:
+        btn_b = None
 
     try:
         led_pin = Pin(SIDE_LED_PIN, Pin.OPEN_DRAIN)
@@ -564,6 +569,15 @@ def make_board_hal():
             except Exception:
                 return 0
 
+        def read_button_b(self) -> int:
+            """1 if middle button held (active-low), else 0."""
+            if btn_b is None:
+                return 0
+            try:
+                return 1 if btn_b.value() == 0 else 0
+            except Exception:
+                return 0
+
         def set_backlight(self, on: bool) -> None:
             bl.value(1 if on else 0)
 
@@ -600,8 +614,12 @@ def make_board_hal():
 
             machine.reset()
 
-        def write_dac_samples(self, data) -> None:
-            """Play u8 mono PCM. Busy-wait on ticks_us (sleep_us is too jittery)."""
+        def write_dac_samples(self, data, fade_out=True, sample_hz=None) -> None:
+            """Play u8 mono PCM. Busy-wait on ticks_us (sleep_us is too jittery).
+
+            fade_out=False for mid-stream song chunks (no end ramp). True for
+            boot riff / last chunk style (ease to mid then park).
+            """
             if not data:
                 return
             _spk_to_dac()
@@ -609,17 +627,18 @@ def make_board_hal():
             if dac is None:
                 return
             # 11,025 Hz => ~90.7 us/sample. Prefer slightly long over short (less harsh).
-            hz = int(BOOT_RIFF_HZ)
+            hz = int(sample_hz if sample_hz is not None else BOOT_RIFF_HZ)
             period = max(1, (1000000 + hz // 2) // hz)
             n = len(data)
-            # Long ease-out to mid (u8 silence = 128). Linear then squared so the
-            # last half of the fade is much quieter (less cliff into mute).
-            fade_ms = int(BOOT_RIFF_FADE_MS) if BOOT_RIFF_FADE_MS else 400
-            fade_n = min(n, max(1, (hz * fade_ms) // 1000))
+            fade_n = 0
+            if fade_out:
+                fade_ms = int(BOOT_RIFF_FADE_MS) if BOOT_RIFF_FADE_MS else 400
+                fade_n = min(n, max(1, (hz * fade_ms) // 1000))
             hold_ms = int(BOOT_RIFF_HOLD_MID_MS) if BOOT_RIFF_HOLD_MID_MS else 50
             try:
-                for _ in range(16):
-                    dac.write(128)
+                if fade_out:
+                    for _ in range(16):
+                        dac.write(128)
                 t_next = time.ticks_us()
                 for i in range(n):
                     b = data[i]
@@ -627,13 +646,10 @@ def make_board_hal():
                         v = ord(b)
                     else:
                         v = int(b) & 0xFF
-                    if i >= n - fade_n:
-                        # progress 0 at fade start → fade_n at end
-                        step = i - (n - fade_n) + 1  # 1..fade_n
-                        # remain_frac = 1 - (step/fade_n); ease with remain^2
-                        remain = fade_n - step + 1  # fade_n..1
-                        # scale = (remain/fade_n)^2
-                        scale = (remain * remain) // fade_n  # fade_n..~0
+                    if fade_n and i >= n - fade_n:
+                        step = i - (n - fade_n) + 1
+                        remain = fade_n - step + 1
+                        scale = (remain * remain) // fade_n
                         v = 128 + ((v - 128) * scale) // fade_n
                     if v < 0:
                         v = 0
@@ -647,18 +663,75 @@ def make_board_hal():
                             if d < -period * 4:
                                 t_next = time.ticks_us()
                             break
-                # Park at mid on the DAC before unmux — avoids a rail slap
-                for _ in range(max(1, (hz * hold_ms) // 1000)):
-                    dac.write(128)
-                    t_next = time.ticks_add(t_next, period)
-                    while time.ticks_diff(t_next, time.ticks_us()) > 0:
-                        pass
-                time.sleep_ms(hold_ms)
+                if fade_out:
+                    for _ in range(max(1, (hz * hold_ms) // 1000)):
+                        dac.write(128)
+                        t_next = time.ticks_add(t_next, period)
+                        while time.ticks_diff(t_next, time.ticks_us()) > 0:
+                            pass
+                    time.sleep_ms(hold_ms)
+                    _spk_off()
             except Exception:
-                pass
-            _spk_off()
+                if fade_out:
+                    _spk_off()
+
+        def play_pcm_file(self, path, stop_reader=None, sample_hz=None, chunk=None) -> str:
+            """Stream u8 mono file. Returns 'done' | 'stopped' | 'missing' | 'error'.
+
+            stop_reader() -> truthy while middle button held. After the start
+            press is released, the next press stops playback.
+            """
+            from defaults import FIRST_SONG_CHUNK, FIRST_SONG_HZ
+
+            if sample_hz is None:
+                sample_hz = FIRST_SONG_HZ
+            if chunk is None:
+                chunk = FIRST_SONG_CHUNK
+            try:
+                f = open(path, "rb")
+            except Exception:
+                return "missing"
+            released = False
+            outcome = "done"
+            try:
+                # Drain the press that started us before arming stop.
+                if stop_reader is not None:
+                    while stop_reader():
+                        time.sleep_ms(20)
+                    released = True
+                while True:
+                    if stop_reader is not None and released and stop_reader():
+                        outcome = "stopped"
+                        break
+                    data = f.read(int(chunk))
+                    if not data:
+                        outcome = "done"
+                        break
+                    # Last chunk of a natural end gets a short fade via dac_idle after.
+                    self.write_dac_samples(data, fade_out=False, sample_hz=sample_hz)
+            except Exception:
+                outcome = "error"
+            finally:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+                try:
+                    self.dac_idle()
+                except Exception:
+                    pass
+            return outcome
 
         def dac_idle(self) -> None:
+            """Ease to mid and release amp (end of stream / stop)."""
+            dac = spk_dac[0]
+            if dac is not None:
+                try:
+                    _spk_to_dac()
+                    for _ in range(64):
+                        dac.write(128)
+                except Exception:
+                    pass
             _spk_off()
 
         def read_angle_raw(self) -> int:
