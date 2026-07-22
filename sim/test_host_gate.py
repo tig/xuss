@@ -174,23 +174,27 @@ def test_banner_scrolls_right_to_left_with_silico_text():
     # After 1s at SPEED px/s, x has moved left by SPEED
     assert fr1["banner_x"] == defaults.LCD_WIDTH - defaults.FACE_BANNER_SPEED_PX_S
     assert fr1["banner_x"] < fr0["banner_x"]
-    # draw_banner paints at least one fg block for visible text
-    rects = []
-
-    def fill_rect(x, y, w, h, rgb):
-        rects.append((x, y, w, h, rgb))
-
-    banner.draw_banner(
-        fill_rect,
+    # Off-screen compose: solid bar + foreground pixels, no multi-pass LCD clear
+    w = defaults.LCD_WIDTH
+    h = defaults.FACE_BANNER_BAR_H
+    buf = banner.make_banner_buf(w, h)
+    fg_px = banner.compose_banner_buf(
+        buf,
+        w,
+        h,
         defaults.FACE_BANNER_TEXT,
         10,
         defaults.FACE_BAR_COLOR,
         defaults.FACE_BANNER_FG,
-        screen_w=defaults.LCD_WIDTH,
-        bar_h=defaults.FACE_BANNER_BAR_H,
     )
-    assert any(r[4] == defaults.FACE_BANNER_FG for r in rects)
-    assert any(r[4] == defaults.FACE_BAR_COLOR for r in rects)
+    assert fg_px > 0
+    assert len(buf) == w * h * 2
+    # Buffer differs from solid bar (text present)
+    solid = banner.make_banner_buf(w, h)
+    banner.compose_banner_buf(
+        solid, w, h, " ", 0, defaults.FACE_BAR_COLOR, defaults.FACE_BANNER_FG
+    )
+    assert buf != solid
 
 
 def test_banner_motion_calls_show_banner():

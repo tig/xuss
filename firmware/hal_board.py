@@ -130,6 +130,33 @@ class _Ili9342:
     def fill(self, color_rgb):
         self.fill_rect(0, 0, self.width, self.height, color_rgb)
 
+    def blit_rgb565(self, x, y, w, h, buf):
+        """One window + one SPI write for a precomposed RGB565 rectangle.
+
+        ``buf`` is row-major big-endian RGB565, length >= w*h*2. Used by the
+        hair-bar marquee so scroll frames never flash a clear-then-draw.
+        """
+        if w <= 0 or h <= 0 or buf is None:
+            return
+        x0 = max(0, int(x))
+        y0 = max(0, int(y))
+        w = int(w)
+        h = int(h)
+        x1 = min(self.width - 1, x0 + w - 1)
+        y1 = min(self.height - 1, y0 + h - 1)
+        if x1 < x0 or y1 < y0:
+            return
+        # Expect exact bar-sized buffer at origin; partial blit not required.
+        need = w * h * 2
+        if len(buf) < need:
+            return
+        self._window(x0, y0, x1, y1)
+        self.dc.value(1)
+        self.cs.value(0)
+        # MicroPython SPI accepts memoryview / bytearray in one transfer.
+        self.spi.write(buf if len(buf) == need else memoryview(buf)[:need])
+        self.cs.value(1)
+
 
 def _pwm_duty_u16(duty_pct):
     p = int(duty_pct)
@@ -342,6 +369,14 @@ def make_board_hal():
 
     _last_face_key = [None]
     _last_edge = [None]
+    # Off-screen hair bar (compose in RAM → one SPI blit; no clear-flash).
+    try:
+        from defaults import FACE_BANNER_BAR_H as _BANNER_H
+    except Exception:
+        _BANNER_H = 28
+    _banner_w = int(LCD_WIDTH)
+    _banner_h = int(_BANNER_H)
+    _banner_buf = bytearray(_banner_w * _banner_h * 2)
 
     class BoardHal:
         def set_led(self, on: bool) -> None:
@@ -381,31 +416,32 @@ def make_board_hal():
             return eye, bar
 
         def _draw_banner_bar(self, frame, bar):
-            from banner import draw_banner
-            from defaults import FACE_BANNER_BAR_H, FACE_BANNER_FG
+            from banner import compose_banner_buf
+            from defaults import FACE_BANNER_FG
 
-            def _fill(x, y, w, h, rgb):
-                lcd.fill_rect(x, y, w, h, rgb)
-
-            draw_banner(
-                _fill,
+            compose_banner_buf(
+                _banner_buf,
+                _banner_w,
+                _banner_h,
                 frame.get("banner_text"),
                 frame.get("banner_x", LCD_WIDTH),
                 bar,
                 FACE_BANNER_FG,
-                screen_w=LCD_WIDTH,
-                bar_h=FACE_BANNER_BAR_H,
-                y0=0,
+                pack_fn=_rgb565,
             )
+            lcd.blit_rgb565(0, 0, _banner_w, _banner_h, _banner_buf)
 
         def show_banner(self, frame) -> None:
-            """Hair-bar marquee only (smooth scroll without full face redraw)."""
+            """Hair-bar marquee only: buffer compose + single blit."""
             if not lcd_ok:
                 return
             mode = frame.get("mode", "idle")
+            left_open = bool(frame.get("left_open", frame.get("eyes_open", True)))
+            right_open = bool(frame.get("right_open", frame.get("eyes_open", True)))
             _eye, bar = self._mode_palette(mode)
             self._draw_banner_bar(frame, bar)
-            _last_face_key[0] = None  # next full show_face must not skip
+            # Keep face key in sync so the next show_face can skip eyes if unchanged.
+            _last_face_key[0] = (mode, left_open, right_open, frame.get("banner_x"))
 
         def show_face(self, frame) -> None:
             if not lcd_ok:

@@ -1,4 +1,8 @@
-"""Hair-bar marquee: scroll math + 5x7 font (host-importable, no machine)."""
+"""Hair-bar marquee: scroll math + 5x7 font + off-screen RGB565 compose.
+
+Drawing path for metal: compose the full bar in RAM, then one bulk blit.
+That avoids the flicker of clear-bar + many fill_rect glyph updates.
+"""
 
 from defaults import (
     FACE_BANNER_GAP_PX,
@@ -110,30 +114,120 @@ def banner_x(t_ms, text=None, screen_w=None):
 def glyph(ch):
     if ch in _FONT:
         return _FONT[ch]
-    # fallback: solid block for unknown
     return (0x7F, 0x7F, 0x7F, 0x7F, 0x7F)
 
 
-def iter_glyph_blocks(ch, origin_x, origin_y, scale=None):
-    """Yield (x, y, w, h) solid blocks for set bits (scale×scale each)."""
-    if scale is None:
-        scale = max(1, int(FACE_BANNER_SCALE))
-    cols = glyph(ch)
-    for col, bits in enumerate(cols):
-        for row in range(7):
-            if bits & (1 << row):
-                yield (
-                    origin_x + col * scale,
-                    origin_y + row * scale,
-                    scale,
-                    scale,
-                )
+def pack_rgb565_panel(r, g, b):
+    """RGB → panel wire RGB565 (M5GO MADCTL BGR: swap R/B)."""
+    r = int(r) & 0xFF
+    g = int(g) & 0xFF
+    b = int(b) & 0xFF
+    return ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)
+
+
+def _fill_buf_solid(buf, w, h, color565):
+    hi = (color565 >> 8) & 0xFF
+    lo = color565 & 0xFF
+    line = bytearray(w * 2)
+    for i in range(w):
+        line[i * 2] = hi
+        line[i * 2 + 1] = lo
+    row_bytes = w * 2
+    for y in range(h):
+        buf[y * row_bytes : (y + 1) * row_bytes] = line
+
+
+def _fill_buf_rect(buf, w, h, x, y, rw, rh, color565):
+    """Solid rect into bar buffer (clipped)."""
+    if rw <= 0 or rh <= 0:
+        return
+    x0 = x if x > 0 else 0
+    y0 = y if y > 0 else 0
+    x1 = x + rw if x + rw < w else w
+    y1 = y + rh if y + rh < h else h
+    if x1 <= x0 or y1 <= y0:
+        return
+    hi = (color565 >> 8) & 0xFF
+    lo = color565 & 0xFF
+    row_bytes = w * 2
+    for yy in range(y0, y1):
+        base = yy * row_bytes
+        for xx in range(x0, x1):
+            i = base + xx * 2
+            buf[i] = hi
+            buf[i + 1] = lo
+
+
+def compose_banner_buf(buf, w, h, text, x0, bar_rgb, fg_rgb, pack_fn=None):
+    """Compose one hair-bar frame into ``buf`` (len >= w*h*2), row-major RGB565.
+
+    Returns number of foreground pixels set (for host tests). Does not touch LCD.
+    """
+    if pack_fn is None:
+        pack_fn = pack_rgb565_panel
+    from defaults import FACE_BANNER_FG, FACE_BAR_COLOR
+
+    if bar_rgb is None:
+        bar_rgb = FACE_BAR_COLOR
+    if fg_rgb is None:
+        fg_rgb = FACE_BANNER_FG
+    text = banner_text() if text is None else str(text)
+    scale = max(1, int(FACE_BANNER_SCALE))
+    w = int(w)
+    h = int(h)
+    need = w * h * 2
+    if buf is None or len(buf) < need:
+        raise ValueError("banner buffer too small")
+
+    bg565 = pack_fn(bar_rgb[0], bar_rgb[1], bar_rgb[2])
+    fg565 = pack_fn(fg_rgb[0], fg_rgb[1], fg_rgb[2])
+    _fill_buf_solid(buf, w, h, bg565)
+
+    glyph_h = 7 * scale
+    text_y = max(0, (h - glyph_h) // 2)
+    x = int(x0)
+    adv = char_advance_px()
+    fg_px = 0
+    for ch in text:
+        if x + adv < 0:
+            x += adv
+            continue
+        if x >= w:
+            break
+        cols = glyph(ch)
+        for col, bits in enumerate(cols):
+            for row in range(7):
+                if bits & (1 << row):
+                    bx = x + col * scale
+                    by = text_y + row * scale
+                    _fill_buf_rect(buf, w, h, bx, by, scale, scale, fg565)
+                    # count clipped area for tests
+                    x0c = bx if bx > 0 else 0
+                    y0c = by if by > 0 else 0
+                    x1c = bx + scale if bx + scale < w else w
+                    y1c = by + scale if by + scale < h else h
+                    if x1c > x0c and y1c > y0c:
+                        fg_px += (x1c - x0c) * (y1c - y0c)
+        x += adv
+    return fg_px
+
+
+def make_banner_buf(w=None, h=None):
+    """Allocate a reusable hair-bar frame buffer."""
+    from defaults import FACE_BANNER_BAR_H
+
+    if w is None:
+        w = int(LCD_WIDTH)
+    if h is None:
+        h = int(FACE_BANNER_BAR_H)
+    return bytearray(int(w) * int(h) * 2)
 
 
 def draw_banner(fill_rect, text, x0, bar_rgb, fg_rgb, screen_w=None, bar_h=None, y0=0):
-    """Draw marquee into the hair bar via fill_rect(x, y, w, h, rgb).
+    """Legacy path: compose off-screen then emit one solid row-strip via fill_rect.
 
-    fill_rect is the LCD (or a recorder). Clips to the bar rectangle.
+    Prefer ``compose_banner_buf`` + LCD blit on metal. This keeps host tests that
+    only mock fill_rect working: we emit a full-bar bg rect then per-pixel fg.
     """
     from defaults import FACE_BANNER_BAR_H, FACE_BANNER_FG, FACE_BAR_COLOR
 
@@ -145,30 +239,31 @@ def draw_banner(fill_rect, text, x0, bar_rgb, fg_rgb, screen_w=None, bar_h=None,
         bar_rgb = FACE_BAR_COLOR
     if fg_rgb is None:
         fg_rgb = FACE_BANNER_FG
-    text = banner_text() if text is None else str(text)
-    scale = max(1, int(FACE_BANNER_SCALE))
+    w = int(screen_w)
+    h = int(bar_h)
     y0 = int(y0)
-    bar_h = int(bar_h)
-    screen_w = int(screen_w)
-    fill_rect(0, y0, screen_w, bar_h, bar_rgb)
-    glyph_h = 7 * scale
-    text_y = y0 + max(0, (bar_h - glyph_h) // 2)
-    x = int(x0)
-    adv = char_advance_px()
-    y1 = y0 + bar_h
-    for ch in text:
-        # skip fully off-left / stop when fully off-right
-        if x + adv < 0:
-            x += adv
-            continue
-        if x >= screen_w:
-            break
-        for bx, by, bw, bh in iter_glyph_blocks(ch, x, text_y, scale=scale):
-            # Clip block to bar/screen
-            x_left = bx if bx > 0 else 0
-            y_top = by if by > y0 else y0
-            x_right = bx + bw if bx + bw < screen_w else screen_w
-            y_bot = by + bh if by + bh < y1 else y1
-            if x_right > x_left and y_bot > y_top:
-                fill_rect(x_left, y_top, x_right - x_left, y_bot - y_top, fg_rgb)
-        x += adv
+    buf = make_banner_buf(w, h)
+    compose_banner_buf(buf, w, h, text, x0, bar_rgb, fg_rgb)
+    # Emit as single bg pass is wrong for tests that count fg — walk buffer.
+    fill_rect(0, y0, w, h, bar_rgb)
+    bg565 = pack_rgb565_panel(bar_rgb[0], bar_rgb[1], bar_rgb[2])
+    bg_hi = (bg565 >> 8) & 0xFF
+    bg_lo = bg565 & 0xFF
+    row_bytes = w * 2
+    # Group horizontal runs of fg for fewer callbacks (still not the metal path).
+    for yy in range(h):
+        base = yy * row_bytes
+        xx = 0
+        while xx < w:
+            i = base + xx * 2
+            if buf[i] == bg_hi and buf[i + 1] == bg_lo:
+                xx += 1
+                continue
+            run = xx
+            while run < w:
+                j = base + run * 2
+                if buf[j] == bg_hi and buf[j + 1] == bg_lo:
+                    break
+                run += 1
+            fill_rect(xx, y0 + yy, run - xx, 1, fg_rgb)
+            xx = run
