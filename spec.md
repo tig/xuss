@@ -98,7 +98,7 @@ You will see:
 - **Front button states** (which of A / B / C are currently held)
 - Other built-in board readings when available (for example free memory)
 
-Numbers update about **twice per second** so you can tilt the device and watch the motion values change. Labels stay put; only the numbers refresh.
+Numbers update **several times per second** so you can tilt the device and watch the motion values change. Labels stay put; only the numbers refresh.
 
 | Control on Details | Effect |
 |---|---|
@@ -108,9 +108,24 @@ Numbers update about **twice per second** so you can tilt the device and watch t
 
 Details uses only sensors **inside** the M5GO core. Plug-in modules on the Grove ports are not part of this screen.
 
+### Power on and off (battery)
+
+Xuss uses the M5GO’s own power control. There is no separate Xuss power key.
+
+While running **on battery** (USB unplugged):
+
+- **Single-click** the red power button on the side to **turn the device on**.
+- **Quick double-click** the red power button to **turn the device off**.
+
+Long-press is not how this hardware powers down. If the unit is still warm after a double-click, try again with two short taps.
+
+While **USB is plugged in**, the M5GO stays powered from the cable (and typically charges the battery). Unplug USB first if you want a true battery-style off.
+
+Some M5GO / Core v2.7 units also have a small **hardware battery switch** on the bottom or back that fully isolates the pack (`0` = battery disconnected). Use that as a hard kill if you need the battery cut completely.
+
 ### Everyday use tips
 
-- **Power**: leave it plugged in on a desk, or unplug when you are done. There is no separate power button on Xuss itself beyond the M5GO hardware.
+- **Desk use**: leave it plugged into USB for all-day play, or run from battery and double-click the red button when you are done.
 - **One thing at a time, simply**: play music, change colors, or browse Details. You do not need an app or a phone.
 - **If the face freezes while a long song plays**: press middle to pause, or right to open Details (which also pauses). That is expected in this product model while full-song audio is active.
 - **Support identity**: the Details screen shows the firmware version. A technician can also read `fw_name` / `fw_version` over the USB serial link.
@@ -162,8 +177,11 @@ M5Stack **M5GO IoT Starter Kit v2.7**. No soldering. No required external units.
 |---|---|
 | M5GO core (ESP32, flash, 2.0" 320×240 IPS, speaker, three front buttons, 6-axis IMU) | Face, audio, buttons, Details sensors |
 | Ten side RGB LEDs | Theme-matched side light |
+| Side red power button (+ battery base) | On/off on battery: single-click on, quick double-click off (M5GO / Core v2.7). USB power keeps the unit on. |
 
 Use only **built-in** sensors on the Details screen (IMU on the internal bus, front buttons, and other core-only readings such as heap free). Do not depend on Port A/B/C modules for Rev 0.3 product behavior.
+
+Power is **hardware-owned** by the M5GO power path (not an Xuss software feature). Product firmware must not fight the power button or require a long-press convention that this board does not implement.
 
 ## 4. User-visible behavior (normative)
 
@@ -220,7 +238,7 @@ Mute (if exposed on the serial parameter table) blocks starting playback and rep
 - From face while song is **playing**: **pause first**, then open Details.
 - While Details is already visible: Button C is a **no-op**.
 - Details shows firmware identity at the top and live built-in sensor values beneath.
-- Sensor values refresh on the order of **500 ms**. Labels and chrome are stable; only value fields update (partial screen update, not a full-panel flash every sample).
+- Sensor values refresh live enough to track a hand tilt. A **~500 ms** interval is a fine default; faster is welcome when partial updates stay smooth (see multi-tasking). Labels and chrome are stable; only value fields update (partial screen update, not a full-panel flash every sample).
 - Required readings when hardware is present: IMU acceleration, rotation rate, IMU temperature; front button levels; optional core extras (e.g. free memory) if cheap to obtain.
 
 ### 4.6 Button map (summary)
@@ -254,7 +272,7 @@ The product simultaneously owns these concerns:
    - accept the escape-hatch commands on the link within a human-reasonable time, or document a short, bounded window if audio temporarily defers serial.
 3. **UI honesty during music.** While full-song audio is active, the visible UI may switch to **Now Playing** (that is product UI, not a crash). The idle face is allowed to pause its wink/banner during that presentation. Returning to face or Details when not playing is mandatory (§4.4).
 4. **Boot riff is special.** The short boot greeting may run as a one-shot near startup before the steady cooperative loop is fully spinning, provided identity is emitted first and the riff ends cleanly.
-5. **Details sampling is low rate.** About 2 Hz is enough. Prefer partial updates for changing values so the panel does not full-refresh every sample.
+5. **Details sampling.** About 2 Hz (~500 ms) is a solid default. Faster updates (down toward the control-loop period) are fine if value fields stay partial-updated and the UI remains responsive. Prefer partial updates for changing values so the panel does not full-refresh every sample.
 6. **Face motion is time-based.** Banner position and wink schedule derive from elapsed time, not from "how many loop iterations ran," so multi-tasking load does not change the look of the character more than briefly.
 
 ### 5.3 Acceptance sketch for multi-tasking
