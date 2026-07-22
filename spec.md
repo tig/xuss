@@ -6,6 +6,8 @@ Xuss is a pocket companion for the M5Stack **M5GO IoT Starter Kit v2.7**. It boo
 
 This document is the product contract. The first half is written for the person who owns the device. The second half is written for the implementer who must rebuild that experience (using [silico](https://github.com/tig/silico)) without guessing at product intent.
 
+Host/board techniques (ESP32 DAC lifecycle, IPS color packing, large-asset deploy, M5GO power) live in silico knowledge — not as product moat here.
+
 ---
 
 ## Working Backwards Artifact: Xuss User's Manual
@@ -54,7 +56,7 @@ Every **ten seconds**, the right eye gives a short wink.
 
 ### Colors (left button)
 
-Press the **left button** (Button A) to cycle the look of the face and the side lights:
+Press the **left button** (Button A) to cycle the look of the face and the side lights **when you are on the face (not playing music)**:
 
 | Step | Name | What you see |
 |---|---|---|
@@ -68,6 +70,8 @@ Press again after Black to return to Blue. The banner (hair) follows the color t
 
 Hold does not fast-forward: one press, one step.
 
+**While a song is playing**, the left button does **not** change colors. It **pauses** the music and brings you back to the face with the same theme as before.
+
 ### Music (middle button)
 
 Xuss can play the full track **First** by Tig through the M5GO speaker.
@@ -75,15 +79,16 @@ Xuss can play the full track **First** by Tig through the M5GO speaker.
 | Action | What happens |
 |---|---|
 | Press **middle** (Button B) while idle | Playback starts from the beginning. The screen switches to a **Now Playing** view (music graphic plus the title **First by Tig**). The middle-button hint becomes a pause symbol. |
-| Press **middle** while the song is playing | Playback **pauses** and remembers where you left off. The face (or the screen you were on) returns. The middle-button hint becomes a play symbol. |
+| Press **middle** while the song is playing | Playback **pauses** and remembers where you left off. The face (or Details, if that is where you came from) returns. The middle-button hint becomes a play symbol. |
 | Press **middle** while paused | Playback **resumes** from the pause point (it does not restart). |
 | Let the song finish | Playback stops at the end. It does **not** loop or auto-restart. Press middle again to play from the start. |
 
 Notes:
 
-- Sound quality is limited by the tiny speaker and the simple digital audio path. The boot riff and the full song use the same kind of audio.
-- While the song is playing, Xuss focuses on music and the Now Playing screen. Pause (middle) or open Details (right) when you want the face or the sensor screen back.
+- Sound quality is limited by the tiny speaker and the simple digital audio path. The boot riff and the full song use the same kind of sample audio (not a square-wave beeper tone for music).
+- While the song is playing, the screen shows **Now Playing** (the idle face may stop winking and scrolling until you pause). That is normal.
 - If you open **Details** (right button) while music is playing, Xuss **pauses first**, then shows Details.
+- If you press **left** while music is playing, Xuss **pauses**, returns to the **face**, and does **not** change the color theme.
 
 There is no volume knob on the front panel in this version. Volume is fixed at a comfortable desk level unless a technician changes it over the serial link (see the technical section).
 
@@ -93,7 +98,7 @@ Press the **right button** (Button C) to open the **Details** screen.
 
 You will see:
 
-- **Firmware name and version** at the top (for support and updates)
+- **Firmware name and version** at the top (for support and updates) — digits must be readable, not solid blocks
 - **Built-in motion sensor** (accelerometer, gyroscope, and a temperature reading from that chip)
 - **Front button states** (which of A / B / C are currently held)
 - Other built-in board readings when available (for example free memory)
@@ -127,8 +132,8 @@ Some M5GO / Core v2.7 units also have a small **hardware battery switch** on the
 
 - **Desk use**: leave it plugged into USB for all-day play, or run from battery and double-click the red button when you are done.
 - **One thing at a time, simply**: play music, change colors, or browse Details. You do not need an app or a phone.
-- **If the face freezes while a long song plays**: press middle to pause, or right to open Details (which also pauses). That is expected in this product model while full-song audio is active.
-- **Support identity**: the Details screen shows the firmware version. A technician can also read `fw_name` / `fw_version` over the USB serial link.
+- **While music plays**: expect the Now Playing screen (not the winking face). Pause with middle, left (back to face, same color), or right (Details after pause).
+- **Support identity**: the Details screen shows the firmware version. A technician can also read `fw_name` / `fw_version` over the USB serial link even while music is playing.
 
 ### Safety and care
 
@@ -139,7 +144,7 @@ Some M5GO / Core v2.7 units also have a small **hardware battery switch** on the
 
 ### What this version is not
 
-This version of Xuss is a **friendly face and music demo** on the M5GO. It is not a phone, not a full media player with a playlist browser, and not a kit that requires soldering or extra modules.
+This version of Xuss is a **friendly face and music demo** on the M5GO. It is not a phone, not a full media player with a playlist browser, and not a kit that requires soldering or extra modules. It is not an engine-speed or bench-instrument product.
 
 ---
 
@@ -147,21 +152,26 @@ This version of Xuss is a **friendly face and music demo** on the M5GO. It is no
 
 Rebuild the experience in the User's Manual on an M5GO v2.7, driven from this spec:
 
-- Boot musical greeting from *First*
+- Boot musical greeting from *First* (sample PCM)
 - Idle face, time-based wink, scrolling hair banner
 - Five color themes (including black/white)
 - Full *First* play / pause / resume / no loop
-- Now Playing UI while full-song audio is active
+- Now Playing UI while full-song audio is active (idle face may freeze)
 - Details screen: firmware + built-in core sensors only
 - Three front buttons with on-screen hints
-- USB serial identity + escape hatch for development
+- USB serial: identity + escape hatch + small commissioning params
+- **Speaker path: sample PCM only** for this rev (no LEDC PWM on the speaker pin)
+
+**Not product requirements for Rev 0.3** (do not reintroduce as the product):
+
+- ANGLE-knob live RPM, PIR greet, edge/tach profiles (`sing` / `run`), Grove modules on Details, multi-track library
 
 ## 2. Readiness layers (definition of done)
 
 | Layer | Proven when |
 |---|---|
-| **L0 (host)** | Face timing, theme cycle, song state machine, gear layout, and protocol parsing pass automated tests against a HAL double (no hardware required). |
-| **L1 (metal)** | On a real M5GO: boot riff audible, face and banner visible, buttons match the manual, full song play/pause/resume works, Details shows live built-in sensors, escape hatch works, identity on the link. |
+| **L0 (host)** | Face timing, theme cycle, song state machine, Details layout, and protocol parsing pass automated tests against a HAL double (no hardware required). |
+| **L1 (metal)** | On a real M5GO: boot riff audible, face and banner visible, buttons match the manual, full song play/pause/resume works, Details shows live built-in sensors, escape hatch works **including while a song is playing**, identity on the link. |
 
 Claims name their layer. Host green is never metal done. Self-report is not measurement for audio or display quality: an operator must see and hear the product face.
 
@@ -178,6 +188,8 @@ M5Stack **M5GO IoT Starter Kit v2.7**. No soldering. No required external units.
 Use only **built-in** sensors on the Details screen (IMU on the internal bus, front buttons, and other core-only readings such as heap free). Do not depend on Port A/B/C modules for Rev 0.3 product behavior.
 
 Power is **hardware-owned** by the M5GO power path (not an Xuss software feature). Product firmware must not fight the power button or require a long-press convention that this board does not implement.
+
+**Speaker:** product audio is **unsigned 8-bit mono PCM** on the board speaker path. Do **not** drive LEDC PWM on the speaker pin in this revision (avoids destroying DAC sample quality for the rest of the boot; see silico `knowledge/esp32-audio.md`).
 
 ## 4. User-visible behavior (normative)
 
@@ -199,6 +211,8 @@ Boot riff end must not click or hard-cut into silence; ease out cleanly.
 
 Face animation timing is wall-clock based, never "tick count" based. Prefer regional updates (eye, banner strip, value fields) over full-frame fills whenever only part of the picture changed.
 
+**Glyph set:** every on-screen string the product shows (banner, labels, firmware version, sensor values) must render with a font that includes at least space, `0–9`, `+`, `-`, `.`, and the letters used in product copy. Missing glyphs that draw as solid blocks are a product defect.
+
 ### 4.3 Themes (Button A)
 
 Cycle order is fixed:
@@ -207,11 +221,15 @@ Cycle order is fixed:
 
 One edge per press (debounce). Themes retint face, hair bar, banner ink, and side LEDs together.
 
-On the Details screen, Button A **exits to the face** and must **not** advance the theme.
+| Context | Button A |
+|---|---|
+| Face (not playing) | Next theme |
+| Full-song **playing** (Now Playing) | **Pause**, restore **face**, **do not** advance theme |
+| Details | Exit to face, **do not** advance theme |
 
 ### 4.4 Music (Button B)
 
-Full-track asset: entire *First* at the same PCM format as the boot riff, streamed from on-device storage (not held entirely in RAM).
+Full-track asset: entire *First* at the same PCM format as the boot riff, **streamed from on-device storage** (not held entirely in RAM). Deploy must place the file on the device filesystem and **verify non-zero size**. If the file is missing or empty, refuse playback with a clear link status (and do not hang the UI).
 
 State machine:
 
@@ -222,11 +240,11 @@ State machine:
 | paused | press | resume from offset; show Now Playing |
 | natural end | — | idle, offset 0, no auto-repeat |
 
-Now Playing content: a clear "music is on" visual plus the title **First by Tig**.
+Now Playing content: a clear "music is on" visual plus the title **First by Tig**. Idle face wink/banner may stop while Now Playing is up.
 
 When not actively playing (paused, finished, or error), restore the previous non-playing UI (face or Details), not only after end-of-track.
 
-Mute (if exposed on the serial parameter table) blocks starting playback and reports a clear status; it does not crash the UI.
+`mute=1` (if set) blocks starting playback and reports a clear status; it does not crash the UI.
 
 ### 4.5 Details (Button C)
 
@@ -234,14 +252,14 @@ Mute (if exposed on the serial parameter table) blocks starting playback and rep
 - From face while song is **playing**: **pause first**, then open Details.
 - While Details is already visible: Button C is a **no-op**.
 - Details shows firmware identity at the top and live built-in sensor values beneath.
-- Sensor values refresh every **100 ms** (~10 Hz). Labels and chrome are stable; only value fields update (partial screen update, not a full-panel flash every sample).
+- Sensor values refresh every **100 ms** (~10 Hz) as a **visual** rate. Labels and chrome are stable; only value fields update (partial screen update, not a full-panel flash every sample).
 - Required readings when hardware is present: IMU acceleration, rotation rate, IMU temperature; front button levels; optional core extras (e.g. free memory) if cheap to obtain.
 
 ### 4.6 Button map (summary)
 
-| Button | Face | Playing | Details |
+| Button | Face (idle/paused) | Playing (Now Playing) | Details |
 |---|---|---|---|
-| A (left) | Next theme | (see multi-tasking §5) | Exit to face, no theme change |
+| A (left) | Next theme | Pause → face, **no** theme change | Exit to face, no theme change |
 | B (middle) | Play / resume | Pause | Play / pause / resume (same rules) |
 | C (right) | Open Details | Pause, then Details | No-op |
 
@@ -257,18 +275,17 @@ The product simultaneously owns these concerns:
 2. **Input** — debounced front buttons
 3. **Audio** — boot riff and full-song PCM to the speaker
 4. **Sensors** — Details sampling when that screen is active
-5. **Link** — USB serial identity, configuration, and the escape hatch
+5. **Link** — USB serial identity, commissioning params, and the escape hatch
 
 ### 5.2 Rules
 
 1. **One scheduler, many jobs.** A single main loop (or equivalent cooperative scheduler) services the concerns above. Do not require an RTOS.
-2. **No silent monopoly.** A long job (especially full-song PCM) must **yield often enough** to:
-   - sample Button B (pause) and Button C (pause-then-Details);
-   - keep the play/pause affordance honest;
-   - accept the escape-hatch commands on the link within a human-reasonable time, or document a short, bounded window if audio temporarily defers serial.
-3. **UI honesty during music.** While full-song audio is active, the visible UI may switch to **Now Playing** (that is product UI, not a crash). The idle face is allowed to pause its wink/banner during that presentation. Returning to face or Details when not playing is mandatory (§4.4).
-4. **Boot riff is special.** The short boot greeting may run as a one-shot near startup before the steady cooperative loop is fully spinning, provided identity is emitted first and the riff ends cleanly.
-5. **Details sampling.** Refresh sensor values every **100 ms**. Only value fields update; chrome stays put.
+2. **No silent monopoly on long audio.** Full-song PCM must **yield often enough** to:
+   - sample Button A (pause → face, no theme change), Button B (pause), and Button C (pause-then-Details);
+   - **service the USB serial link** so `identity`, `repl`, and `reboot` work **while the song is playing** (not only after pause or end). Bounded intake/egress per yield is fine; multi-minute deafness to the link is not.
+3. **UI honesty during music.** While full-song audio is active, the visible UI **may** switch to **Now Playing** and freeze idle wink/banner. That is product UI, not a crash. Returning to face or Details when not playing is mandatory (§4.4).
+4. **Boot riff is special.** The short boot greeting may run as a one-shot near startup before the steady cooperative loop is fully spinning, provided identity is emitted first and the riff ends cleanly. Full-song rules (link service, A/B/C) apply to the long track, not necessarily to the few-second boot riff.
+5. **Details sampling.** Refresh sensor values every **100 ms** (visual). Only value fields update; chrome stays put.
 6. **Face motion is time-based.** Banner position and wink schedule derive from elapsed time, not from "how many loop iterations ran."
 7. **Regional paints.** Wink → eye only. Banner scroll → hair bar only. Details numbers → value strips only. Full-screen clears are for mode changes (theme, enter/leave Details, Now Playing), not for routine animation.
 
@@ -277,29 +294,43 @@ The product simultaneously owns these concerns:
 | Check | Pass when |
 |---|---|
 | Pause while playing | Middle button pauses within a short, human-noticeable delay mid-track |
+| A while playing | Left button pauses, shows face, theme index unchanged |
 | Details while playing | Right button pauses and opens Details without requiring a reset |
-| Escape hatch | `repl` / `reboot` remain reachable from the product link without reflashing |
+| Link while playing | `identity` and `repl` succeed mid-track without requiring a prior pause |
 | Idle life | With no song playing, wink and banner continue indefinitely |
 
 ## 6. Manners and rails
 
 1. **Identity first.** Boot prints `fw_name` / `fw_version` before other chatter.
-2. **Escape hatch from day one.** `repl` parks outputs and returns a usable MicroPython prompt; `reboot` parks and resets. A build without the door fails L1.
+2. **Escape hatch from day one.** `repl` parks outputs and returns a usable MicroPython prompt; `reboot` parks and resets. A build without the door fails L1. Must work mid-song (§5.2).
 3. **Serial is bounded.** Byte-budgeted intake and egress per service turn; malformed input fails closed with a short error; Ctrl-C on the link is data, not a forced interrupt, while the product owns the console.
 4. **Self-report is not measurement.** "I think the DAC worked" is not L1. An operator hears the riff and sees the face.
-5. **Hardware honesty.** Prefer measure-then-fix on this board (display color packing, speaker path, IMU address) over folklore.
+5. **Hardware honesty.** Prefer measure-then-fix on this board (display color packing, speaker path, IMU address) over folklore. Promote reusable truths to silico knowledge.
 
-## 7. Protocol and parameters (high level)
+## 7. Protocol and parameters (canonical allow-list)
 
-ASCII line protocol on USB serial, same family as other silico GCUs: at least `identity`, `get` / `set` / `save` / `defaults`, `repl`, `reboot`.
+ASCII line protocol on USB serial. **This is the complete product command surface for Rev 0.3.** Do not reintroduce instrument verbs as product requirements.
 
-Keep a small parameter table for commissioning (volume, mute, telemetry rate, and similar). Exact keys may match an existing implementation, but product behavior in §4 does not depend on a large instrument map.
+### 7.1 Required commands
 
-| Expectation | Notes |
+| Command | Behavior |
 |---|---|
-| `identity` | Returns firmware name and version |
-| `mute` | When set, blocks starting *First*; survives naive "reset everything" if you keep a commissioning-exempt list |
-| `repl` / `reboot` | Escape hatch (§6) |
+| `identity` | Returns `fw_name=… fw_version=…` |
+| `repl` | Escape hatch: park outputs, restore interrupt character, exit clean to MicroPython prompt |
+| `reboot` | Park outputs, hard reset |
+
+### 7.2 Optional commissioning
+
+| Command / param | Behavior |
+|---|---|
+| `get` / `set` / `save` / `defaults` | Only if you persist commissioning state |
+| `mute` | `0`/`1`; when `1`, blocks starting *First*; may survive `defaults` if you keep an exempt list |
+| `volume` | Integer desk level if exposed; default is a comfortable fixed level |
+| `telemetry_hz` | Optional; `0` = off |
+
+### 7.3 Not product requirements
+
+Do **not** require for Rev 0.3: `rpm`, `route`, `sing`, `run`, `stop` (as instrument), `knob`, `greet`, `ring_teeth`, named engine profiles, or ANGLE/PIR units.
 
 Config persistence, if present, must fall back safely when the on-device image is torn or alien.
 
@@ -312,11 +343,14 @@ Config persistence, if present, must fall back safely when the on-device image i
 | Themes | A cycles blue → orange → red → green → black → blue; sides match; black sides off / white bg | L1 |
 | Play / pause / resume | B starts full track; B pauses mid-song; B resumes (not restart); end does not loop | L1 |
 | Now Playing | While actively playing, screen shows title **First by Tig** | L1 |
-| Details | C opens sensor screen with firmware line; values move when device is tilted; ~100 ms updates without full-screen flash | L1 |
+| A while playing | A pauses and returns to face; theme index unchanged | L1 |
+| Details | C opens sensor screen with firmware line (readable digits); values move when tilted; ~100 ms updates without full-screen flash | L1 |
 | Wink paint | Idle wink changes only the right eye; rest of the face does not flash | L1 |
 | Details while playing | C pauses music then shows Details | L1 |
 | C on Details | Second C does nothing | L1 |
 | A on Details | Returns to face without theme change | L1 |
-| Escape hatch | `repl` exits clean; redeploy possible without hardware gymnastics | L1 |
-
+| Link mid-song | `identity` works while track is playing; `repl` exits clean mid-song | L1 |
+| Missing song file | Clear failure if full-track asset absent; UI remains usable | L1 |
+| Escape hatch | After `repl`, redeploy possible without hardware gymnastics | L1 |
+| PCM speaker path | Music is sample audio; product does not use PWM square wave on the speaker for *First* | L1 |
 )
