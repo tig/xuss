@@ -319,19 +319,4 @@ Config persistence, if present, must fall back safely when the on-device image i
 | A on Details | Returns to face without theme change | L1 |
 | Escape hatch | `repl` exits clean; redeploy possible without hardware gymnastics | L1 |
 
-## 9. The build (for the agent that gets pointed here)
-
-Silico is the harness: https://github.com/tig/silico. Read its `AGENTS.md`; the pip distribution is `tig-silico` (never bare `pip install silico`).
-
-Work **spec-first**: this document is the contract. Do not edit the spec to match a convenient implementation; if the spec is wrong, say so in the PR. Carry an **ambiguity log** in the PR for every place this document forced a guess.
-
-Gates that are part of done: `pytest -q`, `silico gate`, and `silico product-path`, plus metal operator checks from §8.
-
-Implementation detail (DAC reuse, LCD endian, font bitmaps, partial blit strategy, file names on the device filesystem) is deliberately **not** prescribed here. Choose durable approaches; measure on the M5GO when the board disagrees with theory.
-
-## 10. Open items
-
-- [ ] Keep the idle face animating during full-song audio (Now Playing optional).
-- [ ] User-facing volume control (front panel and/or serial).
-- [ ] Additional tracks only if the single-track story stays obvious.
 )
