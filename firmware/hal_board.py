@@ -36,11 +36,12 @@ from defaults import (
 
 
 def _rgb565(r, g, b):
-    """Pack operator RGB into standard RGB565 (same intent as NeoPixel RGB).
+    """Pack operator RGB into RGB565 for the M5GO IPS (same RGB as NeoPixels).
 
-    MADCTL is set for **RGB** (not BGR). SPI sends the 16-bit color
-    big-endian (high byte first), which is the common ILI934x path and
-    matches the side-LED RGB values the operator already confirmed.
+    Panel init uses MADCTL RGB + display inversion ON (0x21), matching the
+    common M5 ILI9342 path. Without INVON, black paints as white and
+    primaries land on complementary / wrong hues (green→purple, etc.).
+    SPI word is big-endian (hi, lo).
     """
     r = int(r) & 0xFF
     g = int(g) & 0xFF
@@ -96,12 +97,12 @@ class _Ili9342:
         self._cmd(0x11)
         time.sleep_ms(120)
         self._cmd(0x3A)
-        self._data_byte(0x55)  # 16-bit pixel
+        self._data_byte(0x55)  # 16-bit/pixel
         self._cmd(0x36)
-        # MADCTL: RGB order (bit3 BGR=0). Prior 0x08 BGR + channel hacks
-        # desynced the IPS from the SK6812s (LEDs were correct; face was not).
-        self._data_byte(0x00)
-        self._cmd(0x29)
+        self._data_byte(0x00)  # MADCTL: RGB (not BGR)
+        # M5GO / ILI9342: inversion required or black↔white and hues invert.
+        self._cmd(0x21)  # INVON
+        self._cmd(0x29)  # display on
         time.sleep_ms(20)
         self.bl.value(1)
 

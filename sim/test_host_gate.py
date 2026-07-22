@@ -284,6 +284,7 @@ def test_lcd_rgb565_matches_led_rgb_intent():
     assert hb._rgb565(255, 0, 0) == 0xF800  # red in high bits
     assert hb._rgb565(0, 255, 0) == 0x07E0
     assert hb._rgb565(0, 0, 255) == 0x001F
+    assert hb._rgb565(0, 0, 0) == 0x0000  # black (needs INVON on glass)
     # SPI big-endian: hi byte first
     hi, lo = hb._rgb565_bytes(255, 0, 0)
     assert (hi, lo) == (0xF8, 0x00)
