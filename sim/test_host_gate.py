@@ -94,6 +94,23 @@ def test_inputs_knob_and_greet_once():
     assert inputs.tick_presence(pres2, 1, True, False, 100) is None
 
 
+def test_idle_face_is_blue_and_side_leds_on():
+    """Product face: blue palette; idle side strip lit (static, not chase-off)."""
+    face = _load("face")
+    defaults = _load("defaults")
+    # No orange singing color
+    assert defaults.FACE_SING_COLOR[0] < defaults.FACE_SING_COLOR[2]
+    assert defaults.FACE_EYE_COLOR[2] >= defaults.FACE_EYE_COLOR[0]
+    fr = face.frame(0, mode="idle")
+    assert fr["eyes_open"] is True
+    side = fr["side"]
+    assert len(side) == defaults.SIDE_LED_COUNT
+    assert any(sum(c) > 0 for c in side), "idle side LEDs must not be all-off"
+    # Blue-ish: blue channel dominates
+    c0 = side[0]
+    assert c0[2] >= c0[0] and c0[2] >= c0[1]
+
+
 def test_riff_streams_samples():
     riff_mod = _load("riff")
     fake = _load_sim("hal_double").FakeHal()

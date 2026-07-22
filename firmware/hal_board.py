@@ -378,7 +378,12 @@ def make_board_hal():
                 bar = eye
             else:
                 eye = FACE_EYE_COLOR
-                bar = (0, 80, 100)
+                try:
+                    from defaults import FACE_BAR_COLOR
+
+                    bar = FACE_BAR_COLOR
+                except Exception:
+                    bar = (0, 50, 120)
 
             # Avoid full-frame fill when possible — only clear once per mode change
             lcd.fill(bg)
@@ -392,7 +397,11 @@ def make_board_hal():
                 lcd.fill_rect(70, 110, 70, 10, eye)
                 lcd.fill_rect(180, 110, 70, 10, eye)
             # Smile: simple upward arc from filled bars (readable on camera)
-            mouth = eye if mode != "idle" else (0, 160, 180)
+            if mode == "idle":
+                # Softer blue mouth than full eye fill
+                mouth = (int(eye[0] * 2 // 3), int(eye[1] * 2 // 3), int(eye[2] * 2 // 3))
+            else:
+                mouth = eye
             # corners up, center lower = smile
             lcd.fill_rect(100, 175, 18, 10, mouth)
             lcd.fill_rect(202, 175, 18, 10, mouth)

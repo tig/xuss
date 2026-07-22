@@ -8,6 +8,7 @@ from defaults import (
     FACE_DRIVE_COLOR,
     FACE_EYE_COLOR,
     FACE_IDLE_DIM,
+    FACE_IDLE_SIDE_ON,
     FACE_SING_COLOR,
     SIDE_LED_COUNT,
 )
@@ -42,15 +43,22 @@ def eyes_open(t_ms, mode="idle"):
 
 
 def side_colors(t_ms, mode="idle"):
-    """Side strip. Idle is static (no chase) — continuous SK6812 bit-bang couples into the amp."""
+    """Side strip. Idle is static (no chase); active modes chase on the beat.
+
+    Continuous SK6812 bit-bang can couple into the M5 amp — idle paints a
+    fixed dim frame once (main throttles rewrites). Operator product face
+    needs the strip visible at idle.
+    """
     n = int(SIDE_LED_COUNT)
     base = _mode_color(mode)
     if mode == "fault":
         return [(40, 0, 0)] * n
     dim = _scale(base, int(FACE_IDLE_DIM))
     if mode == "idle":
-        # fully off when idle — even static dim SK6812 can couple buzz into the amp
-        return [(0, 0, 0)] * n
+        if int(FACE_IDLE_SIDE_ON) == 0:
+            return [(0, 0, 0)] * n
+        # Static soft blue wash — readable on camera, no chase thrash
+        return [dim] * n
     bright = _scale(base, int(FACE_CHASE_BRIGHT))
     idx = (int(t_ms) // int(FACE_CHASE_MS)) % n
     colors = [dim] * n

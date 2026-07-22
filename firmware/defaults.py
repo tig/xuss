@@ -102,13 +102,17 @@ PIR_BOOT_GRACE_MS = 5000  # ignore PIR after boot (and while riff may run)
 CONFIG_PATH = "xuss.cfg"
 CONFIG_VERSION = 1
 
-# Face timing
+# Face timing / palette (blue family — operator product face, not orange/green)
 FACE_CHASE_MS = 120
 FACE_BLINK_PERIOD_MS = 2800
 FACE_BLINK_MS = 140
-FACE_EYE_COLOR = (0, 220, 255)
-FACE_SING_COLOR = (255, 140, 0)
-FACE_DRIVE_COLOR = (40, 220, 80)
-FACE_BG_COLOR = (0, 0, 16)
-FACE_IDLE_DIM = 18
-FACE_CHASE_BRIGHT = 120
+FACE_EYE_COLOR = (40, 140, 255)  # idle eyes / smile
+FACE_SING_COLOR = (90, 190, 255)  # singing — bright blue (was orange)
+FACE_DRIVE_COLOR = (20, 90, 230)  # driving DUT — deep blue (was green)
+FACE_BG_COLOR = (0, 0, 20)
+FACE_BAR_COLOR = (0, 50, 120)  # top status bar when idle
+# Idle side strip: static dim (paint once). Fully off hid the product face LEDs;
+# chase is reserved for singing/driving to limit SK6812 bit-bang amp coupling.
+FACE_IDLE_DIM = 48
+FACE_CHASE_BRIGHT = 140
+FACE_IDLE_SIDE_ON = 1  # 0 = all-off idle strip (legacy silence-first)
