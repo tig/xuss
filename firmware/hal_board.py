@@ -353,21 +353,47 @@ def make_board_hal():
         _last_tach[0] = (0.0, 0)
 
     def _spk_to_dac():
-        # Keep an existing DAC session — re-init every chunk killed song playback.
+        # Prefer DAC when free; many sessions leave it in ESP_ERR_INVALID_STATE.
         if voice_mode[0] == "dac" and spk_dac[0] is not None:
-            return
+            return True
+        if voice_mode[0] == "pcm_pwm" and spk_pwm[0] is not None:
+            return True
         _spk_off()
         try:
-            # Pin number form is more reliable after GPIO remux on some MP builds.
             try:
                 spk_dac[0] = DAC(SPEAKER_PIN)
             except TypeError:
                 spk_dac[0] = DAC(Pin(SPEAKER_PIN))
             spk_dac[0].write(128)
+            voice_mode[0] = "dac"
+            _last_spk[0] = None
+            return True
         except Exception:
             spk_dac[0] = None
-        voice_mode[0] = "dac" if spk_dac[0] is not None else "off"
-        _last_spk[0] = None
+        # Fallback: high-frequency PWM duty = PCM sample (works when DAC stuck).
+        try:
+            spk_pwm[0] = PWM(Pin(SPEAKER_PIN), freq=40000, duty_u16=32768)
+            voice_mode[0] = "pcm_pwm"
+            _last_spk[0] = None
+            return True
+        except Exception:
+            spk_pwm[0] = None
+            voice_mode[0] = "off"
+            return False
+
+    def _pcm_write_sample(v):
+        """Write one u8 PCM sample via DAC or PWM fallback."""
+        if v < 0:
+            v = 0
+        if v > 255:
+            v = 255
+        if spk_dac[0] is not None and voice_mode[0] == "dac":
+            spk_dac[0].write(v)
+            return
+        if spk_pwm[0] is not None and voice_mode[0] == "pcm_pwm":
+            # u8 0..255 → duty_u16 0..65535
+            spk_pwm[0].duty_u16(v * 257)
+            return
 
     def _spk_set(hz, duty_pct):
         key = (float(hz or 0), int(duty_pct))
@@ -377,8 +403,8 @@ def make_board_hal():
             return
         if key == _last_spk[0] and voice_mode[0] == "pwm" and spk_pwm[0] is not None:
             return
-        # stop any DAC/prior PWM cleanly
-        if spk_dac[0] is not None or voice_mode[0] == "dac":
+        # stop any DAC/PCM PWM cleanly
+        if spk_dac[0] is not None or voice_mode[0] in ("dac", "pcm_pwm"):
             _spk_off()
         ihz = int(round(float(hz)))
         if ihz < 1:
@@ -649,9 +675,7 @@ def make_board_hal():
             """
             if not data:
                 return True
-            _spk_to_dac()
-            dac = spk_dac[0]
-            if dac is None:
+            if not _spk_to_dac():
                 return False
             # 11,025 Hz => ~90.7 us/sample. Prefer slightly long over short (less harsh).
             hz = int(sample_hz if sample_hz is not None else BOOT_RIFF_HZ)
@@ -665,7 +689,7 @@ def make_board_hal():
             try:
                 if fade_out:
                     for _ in range(16):
-                        dac.write(128)
+                        _pcm_write_sample(128)
                 t_next = time.ticks_us()
                 for i in range(n):
                     b = data[i]
@@ -678,11 +702,7 @@ def make_board_hal():
                         remain = fade_n - step + 1
                         scale = (remain * remain) // fade_n
                         v = 128 + ((v - 128) * scale) // fade_n
-                    if v < 0:
-                        v = 0
-                    if v > 255:
-                        v = 255
-                    dac.write(v)
+                    _pcm_write_sample(v)
                     t_next = time.ticks_add(t_next, period)
                     while True:
                         d = time.ticks_diff(t_next, time.ticks_us())
@@ -692,7 +712,7 @@ def make_board_hal():
                             break
                 if fade_out:
                     for _ in range(max(1, (hz * hold_ms) // 1000)):
-                        dac.write(128)
+                        _pcm_write_sample(128)
                         t_next = time.ticks_add(t_next, period)
                         while time.ticks_diff(t_next, time.ticks_us()) > 0:
                             pass
@@ -730,10 +750,8 @@ def make_board_hal():
             except Exception:
                 return "missing"
 
-            # One DAC session for the whole stream.
-            _spk_to_dac()
-            dac = spk_dac[0]
-            if dac is None:
+            # One PCM session (DAC or PWM fallback) for the whole stream.
+            if not _spk_to_dac():
                 try:
                     f.close()
                 except Exception:
@@ -760,7 +778,7 @@ def make_board_hal():
 
                 # Brief mid bias so amp wakes before first sample
                 for _ in range(32):
-                    dac.write(128)
+                    _pcm_write_sample(128)
 
                 t_next = time.ticks_us()
                 while True:
@@ -781,11 +799,10 @@ def make_board_hal():
                             and stop_reader()
                         ):
                             outcome = "stopped"
-                            data = b""
                             break
                         b = data[i]
                         v = ord(b) if isinstance(b, str) else (int(b) & 0xFF)
-                        dac.write(v)
+                        _pcm_write_sample(v)
                         t_next = time.ticks_add(t_next, period)
                         while True:
                             d = time.ticks_diff(t_next, time.ticks_us())
@@ -810,13 +827,11 @@ def make_board_hal():
 
         def dac_idle(self) -> None:
             """Ease to mid and release amp (end of stream / stop)."""
-            dac = spk_dac[0]
-            if dac is not None:
-                try:
-                    for _ in range(128):
-                        dac.write(128)
-                except Exception:
-                    pass
+            try:
+                for _ in range(128):
+                    _pcm_write_sample(128)
+            except Exception:
+                pass
             _spk_off()
 
         def read_angle_raw(self) -> int:
