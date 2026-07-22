@@ -1,0 +1,33 @@
+# DAC / PWM measurements — M5GO, MicroPython v1.28.0 ESP32_GENERIC
+# Host: scripts/measure_dac.py + esptool hard reset probe
+# Date: session 2026-07-22
+
+## A) Soft reboot, product main parked (no Xuss HAL)
+
+All DAC(25) opens FAIL with OSError(-259, ESP_ERR_INVALID_STATE).
+PWM on GPIO25 OK.
+(Soft reboot alone did not restore DAC — prior boot had already used the channel.)
+
+## B) Hard reset via esptool RTS (true chip reset)
+
+| test | result | detail |
+|------|--------|--------|
+| hard_DAC_25 (first open) | OK | |
+| hard_DAC_Pin25 (second open after deinit of first) | FAIL | ESP_ERR_INVALID_STATE |
+| hard_DAC_26 | OK | second DAC unit |
+| hard_PWM_25 | OK | |
+| hard_DAC_after_PWM | FAIL | ESP_ERR_INVALID_STATE |
+
+## Conclusions (measured, this board/build)
+
+1. After a **hard reset**, the **first** `DAC(25)` open succeeds.
+2. After that object is released (`deinit()` or drop + GPIO remux), **further `DAC(25)` opens fail** until another hard reset.
+3. After **PWM on GPIO25** (even with deinit), **`DAC(25)` fails** for the rest of the boot.
+4. Soft reboot does **not** reliably restore DAC once the peripheral has been used that way.
+5. Therefore boot-riff quality requires: open DAC once, **keep the object**, soft-silence with `write(0)`; do not deinit between boot riff and Button-B song. PWM square-wave on GPIO25 permanently forces PCM to the poorer PWM path for that boot.
+
+## Product HAL implication
+
+- Keep single DAC session for app lifetime after first successful open.
+- `_spk_off` soft-parks DAC; `_spk_hard_off` only when PWM edge voice is required.
+- PWM PCM remains fallback only when DAC never opened or was hard-killed.

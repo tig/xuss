@@ -206,22 +206,8 @@ def make_board_hal():
 
     # Absolute silence before any peripheral brings the amp up
     emergency_silence()
-    # Ensure DAC channel is free if a prior partial init left it claimed.
-    try:
-        _d = DAC(SPEAKER_PIN)
-        try:
-            _d.deinit()
-        except Exception:
-            pass
-    except Exception:
-        try:
-            _d = DAC(Pin(SPEAKER_PIN))
-            try:
-                _d.deinit()
-            except Exception:
-                pass
-        except Exception:
-            pass
+    # Do NOT open/deinit DAC here: measured — first DAC open is precious;
+    # release makes later opens fail until hard reset (see measure_dac results).
 
     # Buttons A/B — active low, external pull-ups (GPIO39/38 input-only).
     try:
@@ -296,12 +282,18 @@ def make_board_hal():
     except Exception:
         pir_pin = None
 
-    def _spk_off():
-        """True silence: tear down DAC/PWM and hold pin hard low.
+    # Measured on this board (scripts/measure_dac.py + hard reset):
+    # - After RTS hard reset, first DAC(25) open succeeds.
+    # - After that object is released (even with deinit()) or after PWM on
+    #   GPIO25, further DAC(25) opens fail with ESP_ERR_INVALID_STATE until
+    #   another hard reset. Soft reboot alone does not restore DAC.
+    # Therefore: open DAC once, keep the object for the whole app life;
+    # soft-silence with write(0). Never deinit/None the DAC if we still want
+    # boot-riff quality for Button-B *First*.
+    dac_once_failed = [False]
 
-        ESP32 DAC must be deinit()'d or the next DAC() raises
-        ESP_ERR_INVALID_STATE (-259) and song playback goes silent.
-        """
+    def _spk_hard_off():
+        """Tear down PWM and/or abandon DAC (cannot reopen DAC this boot)."""
         if spk_pwm[0] is not None:
             try:
                 spk_pwm[0].duty_u16(0)
@@ -322,8 +314,8 @@ def make_board_hal():
             except Exception:
                 pass
             spk_dac[0] = None
+            dac_once_failed[0] = True  # reopen will fail until hard reset
         try:
-            # Re-mux pin away from DAC/LEDC onto digital GPIO
             p = Pin(SPEAKER_PIN, Pin.OUT)
             p.value(0)
             time.sleep_ms(5)
@@ -333,6 +325,19 @@ def make_board_hal():
         voice_mode[0] = "off"
         _last_spk[0] = (0.0, 0)
         _last_edge[0] = (0.0, 0, "off", 0)
+
+    def _spk_off():
+        """Idle silence without destroying a live DAC session (see measure_dac)."""
+        if spk_dac[0] is not None:
+            try:
+                # Hold rail quiet; keep DAC channel owned for later PCM.
+                spk_dac[0].write(0)
+            except Exception:
+                pass
+            voice_mode[0] = "dac"
+            _last_spk[0] = (0.0, 0)
+            return
+        _spk_hard_off()
 
     def _tach_off():
         if tach_pwm[0] is not None:
@@ -353,24 +358,33 @@ def make_board_hal():
         _last_tach[0] = (0.0, 0)
 
     def _spk_to_dac():
-        # Prefer DAC when free; many sessions leave it in ESP_ERR_INVALID_STATE.
-        if voice_mode[0] == "dac" and spk_dac[0] is not None:
+        """Ensure PCM path ready. Prefer long-lived DAC; PWM only if DAC unusable."""
+        if spk_dac[0] is not None:
+            voice_mode[0] = "dac"
             return True
         if voice_mode[0] == "pcm_pwm" and spk_pwm[0] is not None:
             return True
-        _spk_off()
-        try:
+        # Do not call _spk_hard_off here — that would drop a live DAC.
+        if spk_pwm[0] is not None:
             try:
-                spk_dac[0] = DAC(SPEAKER_PIN)
-            except TypeError:
-                spk_dac[0] = DAC(Pin(SPEAKER_PIN))
-            spk_dac[0].write(128)
-            voice_mode[0] = "dac"
-            _last_spk[0] = None
-            return True
-        except Exception:
-            spk_dac[0] = None
-        # Fallback: high-frequency PWM duty = PCM sample (works when DAC stuck).
+                spk_pwm[0].deinit()
+            except Exception:
+                pass
+            spk_pwm[0] = None
+        if not dac_once_failed[0]:
+            try:
+                try:
+                    spk_dac[0] = DAC(SPEAKER_PIN)
+                except TypeError:
+                    spk_dac[0] = DAC(Pin(SPEAKER_PIN))
+                spk_dac[0].write(128)
+                voice_mode[0] = "dac"
+                _last_spk[0] = None
+                return True
+            except Exception:
+                spk_dac[0] = None
+                dac_once_failed[0] = True
+        # Fallback: PWM duty = sample (poorer quality; only when DAC unavailable)
         try:
             spk_pwm[0] = PWM(Pin(SPEAKER_PIN), freq=40000, duty_u16=32768)
             voice_mode[0] = "pcm_pwm"
@@ -387,25 +401,27 @@ def make_board_hal():
             v = 0
         if v > 255:
             v = 255
-        if spk_dac[0] is not None and voice_mode[0] == "dac":
+        if spk_dac[0] is not None:
             spk_dac[0].write(v)
             return
         if spk_pwm[0] is not None and voice_mode[0] == "pcm_pwm":
-            # u8 0..255 → duty_u16 0..65535
             spk_pwm[0].duty_u16(v * 257)
             return
 
     def _spk_set(hz, duty_pct):
         key = (float(hz or 0), int(duty_pct))
         if hz is None or hz <= 0:
-            if _last_spk[0] != (0.0, 0) or voice_mode[0] != "off":
+            if _last_spk[0] != (0.0, 0) or voice_mode[0] not in ("off", "dac"):
                 _spk_off()
+            elif spk_dac[0] is not None:
+                _spk_off()  # soft silence on DAC
             return
         if key == _last_spk[0] and voice_mode[0] == "pwm" and spk_pwm[0] is not None:
             return
-        # stop any DAC/PCM PWM cleanly
-        if spk_dac[0] is not None or voice_mode[0] in ("dac", "pcm_pwm"):
-            _spk_off()
+        # Square-wave voice needs LEDC PWM on GPIO25. Measured: after PWM,
+        # DAC cannot be reopened this boot — abandon DAC if we must PWM.
+        if spk_dac[0] is not None:
+            _spk_hard_off()
         ihz = int(round(float(hz)))
         if ihz < 1:
             ihz = 1
@@ -421,7 +437,7 @@ def make_board_hal():
             voice_mode[0] = "pwm"
             _last_spk[0] = key
         except Exception:
-            _spk_off()
+            _spk_hard_off()
 
     def _tach_set(hz, duty_pct):
         key = (float(hz or 0), int(duty_pct))
@@ -717,6 +733,7 @@ def make_board_hal():
                         while time.ticks_diff(t_next, time.ticks_us()) > 0:
                             pass
                     time.sleep_ms(hold_ms)
+                    # Soft park — keep DAC for Button-B song (same quality as boot riff)
                     _spk_off()
                 return True
             except Exception:
@@ -826,13 +843,15 @@ def make_board_hal():
             return outcome
 
         def dac_idle(self) -> None:
-            """Ease to mid and release amp (end of stream / stop)."""
+            """Ease toward quiet without destroying DAC session (measure_dac)."""
             try:
-                for _ in range(128):
+                for _ in range(64):
                     _pcm_write_sample(128)
+                for _ in range(64):
+                    _pcm_write_sample(0)
             except Exception:
                 pass
-            _spk_off()
+            _spk_off()  # soft if DAC held
 
         def read_angle_raw(self) -> int:
             if angle_adc is None:
