@@ -1,10 +1,29 @@
-# Xuss Software Specification (draft)
+# Xuss Software Specification
 
-**Rev 0.1, July 2026**
+**Rev 0.2, July 2026**
 
-Xuss is a bench drone with two jobs. The day job: a test instrument that generates engine-speed edge trains, forces inputs, and measures current for sibling GCUs on the bench. The stage job: proof on camera that a spec plus silico produces a working device in about an hour. The trick that keeps the demo honest is that the voice *is* the instrument output: an engine-speed edge train is an audible square wave, and when Xuss sings it is demonstrably on-pitch per this spec's own edge-generator section.
+Xuss is a bench drone with two jobs. 
 
-This is a **requirements** document. It states outcomes, interfaces, and acceptance rows. It does not prescribe module layout or internal APIs.
+* The day job: A fun demo of a M5Stack **M5GO IoT Starter Kit v2.7** that exercises audio output, the display, LEDs, and button input.
+* The stage job: proof on camera that a spec plus silico produces a working device in about an hour, using MicroPython.
+
+## Working Backwards Artifact - Xuss User's Manual
+
+Welcome to Xuss. When the little device boots up it will play a 3-ish second riff from an EDM song you may have heard before, [First by Tig](https://kindel.com/tigger/tig) as it's boot sound. Because Xuss is using MicroPython, the sound quality will be low-fidelity.
+
+After booting it will show a smiley face on the screen with a dark blue background. The eyes and mouth will be bright blue. Across the top of the screen a smootly scrolling banner will continuously scroll from right to left, reading "Xuss: Built with Silico". The M5GO LEDs on the side of the device will be a bright blue color. Every 5 seconds, the right eye will blink like Xuss is winking at you.
+
+Button A, when pressed, the LEDs and face on the screen will cycle through different colors: 
+
+1. (The first state) Blue LED. Face is bright blue on a dark background.
+2. Red LED. Face is bright red, on a dark red background.
+3. Orange LED. Face is yellow on an orange background.
+4. Green LED. Face is bright green on a dark green background.
+5. No LED. Face is black on a white background.
+
+The banner (which is really the face's hair) matches these colors.
+
+Button B, when pushed will play the entirity of "First". Pressing B while the song is playing will pause it.
 
 ## 1. Readiness layers (definition of done)
 
@@ -16,8 +35,6 @@ This is a **requirements** document. It states outcomes, interfaces, and accepta
 
 Claims name their layer. Host green is never fixture done.
 
-**Nothing in this spec is TBD-by-measurement.** Xuss is the instrument, not the mystery; every default below is a choice, not a placeholder. (Its sibling GCUs are the other way around, which is the point of building it.)
-
 ## 2. Hardware (fixed)
 
 M5Stack **M5GO IoT Starter Kit v2.7**. No soldering anywhere in the build.
@@ -26,14 +43,6 @@ M5Stack **M5GO IoT Starter Kit v2.7**. No soldering anywhere in the build.
 |---|---|
 | M5GO core (ESP32, 16 MB flash, 2.0" 320x240 IPS, speaker, mic, three buttons, 6-axis IMU) | The drone: face, voice, buttons |
 | Ten side RGB LEDs | The light show |
-| Grove Port A (I2C) | Day-job sensors: current-sense unit (INA226 class) |
-| Grove Port B (GPIO) | **Tach edge output to the DUT** (Grove pigtail) |
-| Grove Port C (UART) | Reserved |
-| ANGLE unit | **The throttle**: a human revs the simulated engine by hand |
-| PIR unit | Presence: greet once when a human approaches |
-| RGB / IR / ENV III / HUB units | Light show extension, spares, ambient garnish |
-
-First firmware flash is esptool (ESP32, not UF2); afterward deploys are mpremote over USB CDC like every silico GCU.
 
 ## 3. The edge engine (voice and instrument are one section, deliberately)
 
