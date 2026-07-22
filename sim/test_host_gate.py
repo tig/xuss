@@ -277,21 +277,21 @@ def test_left_button_cycles_theme_and_side_leds():
     assert state["theme_idx"] == 0
 
 
-def test_lcd_rgb565_matches_led_rgb_intent():
-    """IPS packing must match NeoPixel RGB (standard RGB565, BE wire)."""
+def test_lcd_rgb565_rb_swap_matches_bench_map():
+    """IPS R↔B vs LEDs: red packs unlike standard RGB565; green unchanged."""
     hb = _load("hal_board")
-    # Pure primaries in standard RGB565
-    assert hb._rgb565(255, 0, 0) == 0xF800  # red in high bits
-    assert hb._rgb565(0, 255, 0) == 0x07E0
-    assert hb._rgb565(0, 0, 255) == 0x001F
-    assert hb._rgb565(0, 0, 0) == 0x0000  # black (needs INVON on glass)
-    # SPI big-endian: hi byte first
+    # Standard RGB565 would put red in high bits (0xF800); panel needs R↔B.
+    assert hb._rgb565(255, 0, 0) == 0x001F  # red → low bits (panel B slot)
+    assert hb._rgb565(0, 0, 255) == 0xF800  # blue → high bits
+    assert hb._rgb565(0, 255, 0) == 0x07E0  # green unchanged
+    assert hb._rgb565(0, 0, 0) == 0x0000
+    # Not the unswapped encoding
+    assert hb._rgb565(255, 0, 0) != 0xF800
+    # SPI big-endian of the swapped word
     hi, lo = hb._rgb565_bytes(255, 0, 0)
-    assert (hi, lo) == (0xF8, 0x00)
+    assert (hi, lo) == (0x00, 0x1F)
     hi_g, lo_g = hb._rgb565_bytes(0, 255, 0)
     assert (hi_g, lo_g) == (0x07, 0xE0)
-    hi_b, lo_b = hb._rgb565_bytes(0, 0, 255)
-    assert (hi_b, lo_b) == (0x00, 0x1F)
 
 
 def test_riff_streams_samples():

@@ -118,11 +118,11 @@ def glyph(ch):
 
 
 def pack_rgb565_panel(r, g, b):
-    """RGB → standard RGB565 word (matches NeoPixel / face theme RGB)."""
+    """RGB → IPS 565 word with R/B swap (see hal_board._rgb565 bench map)."""
     r = int(r) & 0xFF
     g = int(g) & 0xFF
     b = int(b) & 0xFF
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+    return ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)
 
 
 def _be_bytes(color565):

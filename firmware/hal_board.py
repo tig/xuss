@@ -36,21 +36,31 @@ from defaults import (
 
 
 def _rgb565(r, g, b):
-    """Pack operator RGB into RGB565 for the M5GO IPS (same RGB as NeoPixels).
+    """Pack operator RGB into RGB565 for the M5GO IPS.
 
-    Panel init uses MADCTL RGB + display inversion ON (0x21), matching the
-    common M5 ILI9342 path. Without INVON, black paints as white and
-    primaries land on complementary / wrong hues (green→purple, etc.).
+    Operator bench truth (LEDs correct, face wrong without R/B fix):
+
+    | theme  | LED   | face without fix      |
+    | blue   | blue  | yellow / brown        |
+    | orange | orange| light blue (was blue) |
+    | red    | red   | bright blue           |
+    | green  | green | green (ok)            |
+    | black  | off   | black (ok)            |
+
+    That is pure **R↔B** on the glass (G and black unchanged). NeoPixels
+    take straight RGB; the IPS path must swap R/B in the 565 word so face
+    matches the LEDs. INVON (0x21) stays on so black is black.
     SPI word is big-endian (hi, lo).
     """
     r = int(r) & 0xFF
     g = int(g) & 0xFF
     b = int(b) & 0xFF
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+    # Swap R/B relative to standard RGB565 (panel presents BGR).
+    return ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)
 
 
 def _rgb565_bytes(r, g, b):
-    """Two SPI bytes (hi, lo) — big-endian RGB565 on the wire."""
+    """Two SPI bytes (hi, lo) — big-endian 565 word on the wire."""
     c = _rgb565(r, g, b)
     return ((c >> 8) & 0xFF), (c & 0xFF)
 
