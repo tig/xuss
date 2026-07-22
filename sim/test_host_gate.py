@@ -127,13 +127,13 @@ def test_themes_cycle_and_black_sides_off():
     fr_o = face.frame(0, mode="idle", theme_idx=1)
     assert fr_o["theme_name"] == "orange"
     assert fr_o["eye_color"][0] > fr_o["eye_color"][1] > fr_o["eye_color"][2]
-    # Black: side LEDs fully off; pure black face (not light gray)
+    # Black: white background, black face; side LEDs off
     fr_b = face.frame(0, mode="idle", theme_idx=4)
     assert fr_b["theme_name"] == "black"
     assert all(c == (0, 0, 0) for c in fr_b["side"])
-    assert fr_b["bg_color"] == (0, 0, 0)
+    assert fr_b["bg_color"] == (255, 255, 255)
     assert fr_b["eye_color"] == (0, 0, 0)
-    assert fr_b["banner_fg"] == (0, 0, 0)
+    assert fr_b["bar_color"] == (0, 0, 0)
     assert face.next_theme_index(4) == 0
 
 

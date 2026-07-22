@@ -171,11 +171,11 @@ FACE_THEMES = (
     },
     {
         "name": "black",
-        # Pure black face (no charcoal wash); sides off; banner invisible.
+        # White field, black face features; side LEDs off.
         "eye": (0, 0, 0),
-        "bar": (0, 0, 0),
-        "bg": (0, 0, 0),
-        "banner_fg": (0, 0, 0),
+        "bar": (0, 0, 0),  # dark hair bar
+        "bg": (255, 255, 255),
+        "banner_fg": (255, 255, 255),  # light text on dark bar
         "side": (0, 0, 0),  # off
     },
 )
