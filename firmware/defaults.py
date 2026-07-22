@@ -114,9 +114,16 @@ FACE_EYE_COLOR = (40, 140, 255)  # idle eyes / smile
 FACE_SING_COLOR = (90, 190, 255)  # singing — bright blue (was orange)
 FACE_DRIVE_COLOR = (20, 90, 230)  # driving DUT — deep blue (was green)
 FACE_BG_COLOR = (0, 0, 20)
-FACE_BAR_COLOR = (0, 50, 120)  # top status bar when idle
+FACE_BAR_COLOR = (0, 50, 120)  # top status bar / hair when idle
 # Idle side strip: static dim (paint once). Fully off hid the product face LEDs;
 # chase is reserved for singing/driving to limit SK6812 bit-bang amp coupling.
 FACE_IDLE_DIM = 48
 FACE_CHASE_BRIGHT = 140
 FACE_IDLE_SIDE_ON = 1  # 0 = all-off idle strip (legacy silence-first)
+# Hair-bar marquee (time-based scroll, right → left).
+FACE_BANNER_TEXT = "Xuss; built with Silico"
+FACE_BANNER_SPEED_PX_S = 48  # smooth ~1–2 px per control tick
+FACE_BANNER_GAP_PX = 64  # quiet gap before the text re-enters
+FACE_BANNER_SCALE = 2  # 5x7 font → 10x14 in the 28px bar
+FACE_BANNER_BAR_H = 28
+FACE_BANNER_FG = (200, 230, 255)  # light blue on dark hair

@@ -1,5 +1,6 @@
 """Face choreography — time-based patterns only (spec §4). No hardware."""
 
+from banner import banner_text, banner_x
 from defaults import (
     FACE_BLINK_MS,
     FACE_BLINK_PERIOD_MS,
@@ -114,5 +115,7 @@ def frame(t_ms, mode="idle", identity="XUSS"):
         "left_open": bool(left),
         "right_open": bool(right),
         "side": side_colors(t_ms, mode=mode),
+        "banner_text": banner_text(),
+        "banner_x": banner_x(t_ms),
         "t_ms": int(t_ms),
     }

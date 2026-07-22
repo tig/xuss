@@ -364,40 +364,81 @@ def make_board_hal():
                     np[i] = (0, 0, 0)
             np.write()
 
+        def _mode_palette(self, mode):
+            if mode == "singing":
+                return FACE_SING_COLOR, FACE_SING_COLOR
+            if mode == "driving":
+                return FACE_DRIVE_COLOR, FACE_DRIVE_COLOR
+            if mode == "fault":
+                return (255, 40, 40), (255, 40, 40)
+            eye = FACE_EYE_COLOR
+            try:
+                from defaults import FACE_BAR_COLOR
+
+                bar = FACE_BAR_COLOR
+            except Exception:
+                bar = (0, 50, 120)
+            return eye, bar
+
+        def _draw_banner_bar(self, frame, bar):
+            from banner import draw_banner
+            from defaults import FACE_BANNER_BAR_H, FACE_BANNER_FG
+
+            def _fill(x, y, w, h, rgb):
+                lcd.fill_rect(x, y, w, h, rgb)
+
+            draw_banner(
+                _fill,
+                frame.get("banner_text"),
+                frame.get("banner_x", LCD_WIDTH),
+                bar,
+                FACE_BANNER_FG,
+                screen_w=LCD_WIDTH,
+                bar_h=FACE_BANNER_BAR_H,
+                y0=0,
+            )
+
+        def show_banner(self, frame) -> None:
+            """Hair-bar marquee only (smooth scroll without full face redraw)."""
+            if not lcd_ok:
+                return
+            mode = frame.get("mode", "idle")
+            _eye, bar = self._mode_palette(mode)
+            self._draw_banner_bar(frame, bar)
+            _last_face_key[0] = None  # next full show_face must not skip
+
         def show_face(self, frame) -> None:
             if not lcd_ok:
                 return
             left_open = bool(frame.get("left_open", frame.get("eyes_open", True)))
             right_open = bool(frame.get("right_open", frame.get("eyes_open", True)))
             mode = frame.get("mode", "idle")
-            # Re-draw when mode or either eye changes (idle wink every 10s).
-            key = (mode, left_open, right_open)
+            banner_x = frame.get("banner_x")
+            # Re-draw when mode, eyes, or marquee position changes.
+            key = (mode, left_open, right_open, banner_x)
             if key == _last_face_key[0]:
                 return
+            prev = _last_face_key[0]
             _last_face_key[0] = key
 
+            # Marquee-only change: avoid full face thrash (eyes/smile stay).
+            if (
+                prev is not None
+                and prev[0] == mode
+                and prev[1] == left_open
+                and prev[2] == right_open
+                and prev[3] != banner_x
+            ):
+                _eye, bar = self._mode_palette(mode)
+                self._draw_banner_bar(frame, bar)
+                return
+
             bg = FACE_BG_COLOR
-            if mode == "singing":
-                eye = FACE_SING_COLOR
-                bar = FACE_SING_COLOR
-            elif mode == "driving":
-                eye = FACE_DRIVE_COLOR
-                bar = FACE_DRIVE_COLOR
-            elif mode == "fault":
-                eye = (255, 40, 40)
-                bar = eye
-            else:
-                eye = FACE_EYE_COLOR
-                try:
-                    from defaults import FACE_BAR_COLOR
+            eye, bar = self._mode_palette(mode)
 
-                    bar = FACE_BAR_COLOR
-                except Exception:
-                    bar = (0, 50, 120)
-
-            # Full clear on eye-state change keeps wink edges clean (rare: 1/10s idle).
+            # Full clear on eye/mode change keeps wink edges clean.
             lcd.fill(bg)
-            lcd.fill_rect(0, 0, LCD_WIDTH, 28, bar)
+            self._draw_banner_bar(frame, bar)
 
             def _draw_eye(x, open_):
                 if open_:

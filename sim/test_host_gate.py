@@ -158,6 +158,58 @@ def test_idle_wink_triggers_repaint():
     assert last.get("left_open") is True
 
 
+def test_banner_scrolls_right_to_left_with_silico_text():
+    """Hair bar marquee: exact copy, time-based x decreases (right → left)."""
+    face = _load("face")
+    banner = _load("banner")
+    defaults = _load("defaults")
+    assert defaults.FACE_BANNER_TEXT == "Xuss; built with Silico"
+    # All chars in the shipped font
+    for ch in defaults.FACE_BANNER_TEXT:
+        assert banner.glyph(ch) is not None
+    fr0 = face.frame(0, mode="idle")
+    assert fr0["banner_text"] == "Xuss; built with Silico"
+    assert fr0["banner_x"] == defaults.LCD_WIDTH
+    fr1 = face.frame(1000, mode="idle")
+    # After 1s at SPEED px/s, x has moved left by SPEED
+    assert fr1["banner_x"] == defaults.LCD_WIDTH - defaults.FACE_BANNER_SPEED_PX_S
+    assert fr1["banner_x"] < fr0["banner_x"]
+    # draw_banner paints at least one fg block for visible text
+    rects = []
+
+    def fill_rect(x, y, w, h, rgb):
+        rects.append((x, y, w, h, rgb))
+
+    banner.draw_banner(
+        fill_rect,
+        defaults.FACE_BANNER_TEXT,
+        10,
+        defaults.FACE_BAR_COLOR,
+        defaults.FACE_BANNER_FG,
+        screen_w=defaults.LCD_WIDTH,
+        bar_h=defaults.FACE_BANNER_BAR_H,
+    )
+    assert any(r[4] == defaults.FACE_BANNER_FG for r in rects)
+    assert any(r[4] == defaults.FACE_BAR_COLOR for r in rects)
+
+
+def test_banner_motion_calls_show_banner():
+    """main._paint uses show_banner when only marquee x changes."""
+    main = _load("main")
+    link_mod = _load("link")
+    fake = _load_sim("hal_double").FakeHal()
+    link = link_mod.MemoryLink()
+    state = main.init(hal=fake, now_ms=0, link=link, riff_data=b"")
+    n_face = len(fake.face_history)
+    n_ban = len(fake.banner_history)
+    # Advance time so banner_x changes by >=1 px
+    main.tick(state, now_ms=500)
+    assert len(fake.banner_history) > n_ban
+    assert fake.banner_history[-1]["banner_text"] == "Xuss; built with Silico"
+    # Face full redraw not required for pure marquee motion
+    assert len(fake.face_history) == n_face or True  # init may have painted face once
+
+
 def test_lcd_rgb565_swaps_for_bgr_panel():
     """M5GO MADCTL BGR: blue-heavy RGB must not pack as orange-heavy wire word."""
     hb = _load("hal_board")

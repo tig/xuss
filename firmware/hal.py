@@ -11,6 +11,10 @@ class Hal:
     def show_face(self, frame) -> None:
         raise NotImplementedError
 
+    def show_banner(self, frame) -> None:
+        """Optional: hair-bar marquee only (default: fall back via show_face)."""
+        self.show_face(frame)
+
     def set_backlight(self, on: bool) -> None:
         raise NotImplementedError
 

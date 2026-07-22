@@ -162,13 +162,21 @@ def _paint(state, now_ms=None):
     if hal is None:
         return fr
 
-    # Idle: static side strip, but re-paint LCD when wink/blink eye state changes.
+    # Idle: static side strip; re-paint LCD on wink and/or hair-bar marquee motion.
     eye_key = (fr.get("left_open", True), fr.get("right_open", True))
+    banner_x = fr.get("banner_x")
+    face_changed = (
+        mode != prev_mode
+        or state.get("_idle_eye_key") != eye_key
+        or not state.get("_idle_painted")
+    )
+    banner_changed = state.get("_banner_x") != banner_x
     if (
         mode == "idle"
         and prev_mode == "idle"
         and state.get("_idle_painted")
-        and state.get("_idle_eye_key") == eye_key
+        and not face_changed
+        and not banner_changed
     ):
         return fr
 
@@ -180,14 +188,24 @@ def _paint(state, now_ms=None):
     if prev != side_key and hasattr(hal, "set_side_leds"):
         hal.set_side_leds(fr["side"])
         state["_side_key"] = side_key
-    if hasattr(hal, "show_face"):
+
+    if face_changed and hasattr(hal, "show_face"):
+        # Full face (eyes/smile/mode) — also draws current banner.
         hal.show_face(fr)
+    elif banner_changed and hasattr(hal, "show_banner"):
+        # Bar-only update keeps marquee smooth without full LCD thrash.
+        hal.show_banner(fr)
+    elif banner_changed and hasattr(hal, "show_face"):
+        # Host doubles may only implement show_face.
+        hal.show_face(fr)
+
     if mode == "idle":
         state["_idle_painted"] = True
         state["_idle_eye_key"] = eye_key
     else:
         state["_idle_painted"] = False
         state["_idle_eye_key"] = None
+    state["_banner_x"] = banner_x
     return fr
 
 

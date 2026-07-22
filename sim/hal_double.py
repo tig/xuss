@@ -9,8 +9,10 @@ class FakeHal:
         self.sleeps = []
         self.side_history = []
         self.face_history = []
+        self.banner_history = []
         self.last_side = None
         self.last_face = None
+        self.last_banner = None
         self.edge_history = []
         self.last_edge = None
         self.park_count = 0
@@ -32,6 +34,10 @@ class FakeHal:
     def show_face(self, frame) -> None:
         self.last_face = dict(frame)
         self.face_history.append(dict(frame))
+
+    def show_banner(self, frame) -> None:
+        self.last_banner = dict(frame)
+        self.banner_history.append(dict(frame))
 
     def set_backlight(self, on: bool) -> None:
         self.backlight = bool(on)

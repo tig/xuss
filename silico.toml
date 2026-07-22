@@ -1,7 +1,7 @@
 [product]
 name = "Xuss"
 fw_name = "XUSS"
-fw_version = "0.3.11"
+fw_version = "0.3.12"
 
 [runtime]
 mpy_cross = "1.28.0rc0.post2"
@@ -27,6 +27,7 @@ core = [
   "firmware/link.py",
   "firmware/protocol.py",
   "firmware/face.py",
+  "firmware/banner.py",
   "firmware/hal.py",
   "firmware/hal_board.py",
   "firmware/main.py",
