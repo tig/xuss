@@ -12,6 +12,7 @@ from defaults import (
     BOOT_RIFF_FADE_MS,
     BOOT_RIFF_HOLD_MID_MS,
     BOOT_RIFF_HZ,
+    BUTTON_A_PIN,
     FACE_BG_COLOR,
     FACE_DRIVE_COLOR,
     FACE_EYE_COLOR,
@@ -189,6 +190,12 @@ def make_board_hal():
 
     # Absolute silence before any peripheral brings the amp up
     emergency_silence()
+
+    # Button A (left) — active low, external pull-up on M5GO (GPIO39 input-only).
+    try:
+        btn_a = Pin(int(BUTTON_A_PIN), Pin.IN)
+    except Exception:
+        btn_a = None
 
     try:
         led_pin = Pin(SIDE_LED_PIN, Pin.OPEN_DRAIN)
@@ -399,34 +406,63 @@ def make_board_hal():
                     np[i] = (0, 0, 0)
             np.write()
 
-        def _mode_palette(self, mode):
-            if mode == "singing":
-                return FACE_SING_COLOR, FACE_SING_COLOR
-            if mode == "driving":
-                return FACE_DRIVE_COLOR, FACE_DRIVE_COLOR
-            if mode == "fault":
-                return (255, 40, 40), (255, 40, 40)
-            eye = FACE_EYE_COLOR
-            try:
-                from defaults import FACE_BAR_COLOR
+        def _frame_palette(self, frame):
+            """Prefer theme colors from the face frame; fall back to defaults."""
+            mode = frame.get("mode", "idle") if frame else "idle"
+            eye = None
+            bar = None
+            bg = None
+            banner_fg = None
+            if frame:
+                eye = frame.get("eye_color")
+                bar = frame.get("bar_color")
+                bg = frame.get("bg_color")
+                banner_fg = frame.get("banner_fg")
+            if eye is None or bar is None:
+                if mode == "singing":
+                    eye = eye or FACE_SING_COLOR
+                    bar = bar or FACE_SING_COLOR
+                elif mode == "driving":
+                    eye = eye or FACE_DRIVE_COLOR
+                    bar = bar or FACE_DRIVE_COLOR
+                elif mode == "fault":
+                    eye = eye or (255, 40, 40)
+                    bar = bar or (255, 40, 40)
+                else:
+                    eye = eye or FACE_EYE_COLOR
+                    try:
+                        from defaults import FACE_BAR_COLOR
 
-                bar = FACE_BAR_COLOR
-            except Exception:
-                bar = (0, 50, 120)
-            return eye, bar
+                        bar = bar or FACE_BAR_COLOR
+                    except Exception:
+                        bar = bar or (0, 50, 120)
+            if bg is None:
+                bg = FACE_BG_COLOR
+            if banner_fg is None:
+                try:
+                    from defaults import FACE_BANNER_FG
 
-        def _draw_banner_bar(self, frame, bar):
+                    banner_fg = FACE_BANNER_FG
+                except Exception:
+                    banner_fg = (200, 230, 255)
+            return eye, bar, bg, banner_fg
+
+        def _draw_banner_bar(self, frame, bar, banner_fg=None):
             from banner import compose_banner_buf
             from defaults import FACE_BANNER_FG
 
+            if banner_fg is None:
+                banner_fg = frame.get("banner_fg") if frame else None
+            if banner_fg is None:
+                banner_fg = FACE_BANNER_FG
             compose_banner_buf(
                 _banner_buf,
                 _banner_w,
                 _banner_h,
-                frame.get("banner_text"),
-                frame.get("banner_x", LCD_WIDTH),
+                frame.get("banner_text") if frame else None,
+                frame.get("banner_x", LCD_WIDTH) if frame else LCD_WIDTH,
                 bar,
-                FACE_BANNER_FG,
+                banner_fg,
                 pack_fn=_rgb565,
             )
             lcd.blit_rgb565(0, 0, _banner_w, _banner_h, _banner_buf)
@@ -438,10 +474,16 @@ def make_board_hal():
             mode = frame.get("mode", "idle")
             left_open = bool(frame.get("left_open", frame.get("eyes_open", True)))
             right_open = bool(frame.get("right_open", frame.get("eyes_open", True)))
-            _eye, bar = self._mode_palette(mode)
-            self._draw_banner_bar(frame, bar)
+            _eye, bar, _bg, banner_fg = self._frame_palette(frame)
+            self._draw_banner_bar(frame, bar, banner_fg=banner_fg)
             # Keep face key in sync so the next show_face can skip eyes if unchanged.
-            _last_face_key[0] = (mode, left_open, right_open, frame.get("banner_x"))
+            _last_face_key[0] = (
+                mode,
+                left_open,
+                right_open,
+                frame.get("banner_x"),
+                frame.get("theme_idx"),
+            )
 
         def show_face(self, frame) -> None:
             if not lcd_ok:
@@ -450,12 +492,15 @@ def make_board_hal():
             right_open = bool(frame.get("right_open", frame.get("eyes_open", True)))
             mode = frame.get("mode", "idle")
             banner_x = frame.get("banner_x")
-            # Re-draw when mode, eyes, or marquee position changes.
-            key = (mode, left_open, right_open, banner_x)
+            theme_idx = frame.get("theme_idx")
+            # Re-draw when mode, eyes, theme, or marquee position changes.
+            key = (mode, left_open, right_open, banner_x, theme_idx)
             if key == _last_face_key[0]:
                 return
             prev = _last_face_key[0]
             _last_face_key[0] = key
+
+            eye, bar, bg, banner_fg = self._frame_palette(frame)
 
             # Marquee-only change: avoid full face thrash (eyes/smile stay).
             if (
@@ -463,18 +508,15 @@ def make_board_hal():
                 and prev[0] == mode
                 and prev[1] == left_open
                 and prev[2] == right_open
+                and prev[4] == theme_idx
                 and prev[3] != banner_x
             ):
-                _eye, bar = self._mode_palette(mode)
-                self._draw_banner_bar(frame, bar)
+                self._draw_banner_bar(frame, bar, banner_fg=banner_fg)
                 return
 
-            bg = FACE_BG_COLOR
-            eye, bar = self._mode_palette(mode)
-
-            # Full clear on eye/mode change keeps wink edges clean.
+            # Full clear on eye/mode/theme change keeps wink edges clean.
             lcd.fill(bg)
-            self._draw_banner_bar(frame, bar)
+            self._draw_banner_bar(frame, bar, banner_fg=banner_fg)
 
             def _draw_eye(x, open_):
                 if open_:
@@ -488,7 +530,7 @@ def make_board_hal():
             _draw_eye(180, right_open)
             # Smile: simple upward arc from filled bars (readable on camera)
             if mode == "idle":
-                # Softer blue mouth than full eye fill
+                # Softer mouth than full eye fill (black theme stays black)
                 mouth = (int(eye[0] * 2 // 3), int(eye[1] * 2 // 3), int(eye[2] * 2 // 3))
             else:
                 mouth = eye
@@ -497,6 +539,15 @@ def make_board_hal():
             lcd.fill_rect(202, 175, 18, 10, mouth)
             lcd.fill_rect(115, 185, 90, 10, mouth)
             lcd.fill_rect(125, 195, 70, 8, mouth)
+
+        def read_button_a(self) -> int:
+            """1 if left button held (active-low), else 0."""
+            if btn_a is None:
+                return 0
+            try:
+                return 1 if btn_a.value() == 0 else 0
+            except Exception:
+                return 0
 
         def set_backlight(self, on: bool) -> None:
             bl.value(1 if on else 0)

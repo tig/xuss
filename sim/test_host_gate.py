@@ -95,20 +95,34 @@ def test_inputs_knob_and_greet_once():
 
 
 def test_idle_face_is_blue_and_side_leds_on():
-    """Product face: blue palette; idle side strip lit (static, not chase-off)."""
+    """Product face: default blue theme; idle side strip lit (static)."""
     face = _load("face")
     defaults = _load("defaults")
-    # No orange singing color
-    assert defaults.FACE_SING_COLOR[0] < defaults.FACE_SING_COLOR[2]
-    assert defaults.FACE_EYE_COLOR[2] >= defaults.FACE_EYE_COLOR[0]
-    fr = face.frame(0, mode="idle")
+    fr = face.frame(0, mode="idle", theme_idx=defaults.FACE_THEME_DEFAULT)
     assert fr["eyes_open"] is True
+    assert fr["theme_name"] == "blue"
     side = fr["side"]
     assert len(side) == defaults.SIDE_LED_COUNT
     assert any(sum(c) > 0 for c in side), "idle side LEDs must not be all-off"
     # Blue-ish: blue channel dominates
     c0 = side[0]
     assert c0[2] >= c0[0] and c0[2] >= c0[1]
+
+
+def test_themes_cycle_and_black_sides_off():
+    face = _load("face")
+    defaults = _load("defaults")
+    names = [t["name"] for t in defaults.FACE_THEMES]
+    assert names == ["blue", "orange", "red", "green", "black"]
+    # Orange has red-dominant eye
+    fr_o = face.frame(0, mode="idle", theme_idx=1)
+    assert fr_o["theme_name"] == "orange"
+    assert fr_o["eye_color"][0] > fr_o["eye_color"][2]
+    # Black: side LEDs fully off
+    fr_b = face.frame(0, mode="idle", theme_idx=4)
+    assert fr_b["theme_name"] == "black"
+    assert all(c == (0, 0, 0) for c in fr_b["side"])
+    assert face.next_theme_index(4) == 0
 
 
 def test_idle_wink_every_10_seconds():
@@ -212,6 +226,42 @@ def test_banner_motion_calls_show_banner():
     assert fake.banner_history[-1]["banner_text"] == "Xuss; built with Silico"
     # Face full redraw not required for pure marquee motion
     assert len(fake.face_history) == n_face or True  # init may have painted face once
+
+
+def test_left_button_cycles_theme_and_side_leds():
+    """Button A press edge advances theme; black kills side LEDs."""
+    main = _load("main")
+    defaults = _load("defaults")
+    link_mod = _load("link")
+    fake = _load_sim("hal_double").FakeHal()
+    link = link_mod.MemoryLink()
+    state = main.init(hal=fake, now_ms=0, link=link, riff_data=b"")
+    assert state["theme_idx"] == defaults.FACE_THEME_DEFAULT
+    # Press and hold
+    fake.button_a = 1
+    main.tick(state, now_ms=1000)
+    assert state["theme_idx"] == 1
+    assert any("theme=orange" in x for x in link.out)
+    assert fake.last_side is not None
+    assert fake.last_side[0][0] > fake.last_side[0][2]  # orange-ish
+    # Holding must not re-fire
+    main.tick(state, now_ms=1100)
+    assert state["theme_idx"] == 1
+    # Release + press through remaining themes to black
+    fake.button_a = 0
+    main.tick(state, now_ms=1400)
+    for i, t_ms in enumerate((1700, 2000, 2300), start=2):
+        fake.button_a = 1
+        main.tick(state, now_ms=t_ms)
+        assert state["theme_idx"] == i
+        fake.button_a = 0
+        main.tick(state, now_ms=t_ms + 100)
+    assert state["theme_idx"] == 4  # black
+    assert fake.last_side == [(0, 0, 0)] * defaults.SIDE_LED_COUNT
+    # Wrap to blue
+    fake.button_a = 1
+    main.tick(state, now_ms=2800)
+    assert state["theme_idx"] == 0
 
 
 def test_lcd_rgb565_swaps_for_bgr_panel():

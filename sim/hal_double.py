@@ -21,6 +21,7 @@ class FakeHal:
         self.dac_idle_count = 0
         self.angle_raw = 0
         self.pir = 0
+        self.button_a = 0
         self.files = {}
 
     def set_led(self, on: bool) -> None:
@@ -66,6 +67,9 @@ class FakeHal:
 
     def read_pir(self) -> int:
         return 1 if self.pir else 0
+
+    def read_button_a(self) -> int:
+        return 1 if self.button_a else 0
 
     def write_text(self, path: str, text: str) -> None:
         self.files[path] = text

@@ -49,6 +49,10 @@ class Hal:
         """1 if human present, else 0."""
         raise NotImplementedError
 
+    def read_button_a(self) -> int:
+        """1 if left front button (Button A) is pressed, else 0."""
+        return 0
+
     def write_text(self, path: str, text: str) -> None:
         raise NotImplementedError
 

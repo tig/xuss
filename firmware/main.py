@@ -1,10 +1,18 @@
 """Boot entry: init + tick. Host-import safe — no machine in this module."""
 
 from config import factory as config_factory, set_param
-from defaults import SERIAL_IN_BUDGET, SERIAL_OUT_BUDGET, TICK_SLEEP_MS
+from defaults import FACE_THEME_DEFAULT, SERIAL_IN_BUDGET, SERIAL_OUT_BUDGET, TICK_SLEEP_MS
 from engine import face_mode, make_engine, set_rpm, tick_engine
 from face import frame as face_frame
-from inputs import adc_to_rpm, chirp_active, make_presence, tick_presence
+from face import next_theme_index
+from inputs import (
+    adc_to_rpm,
+    chirp_active,
+    make_button,
+    make_presence,
+    tick_button_press,
+    tick_presence,
+)
 from link import LineAssembler, make_stdio_link
 from protocol import handle_line, identity_line
 from riff import load_riff_bytes, make_riff
@@ -51,6 +59,8 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
         "identity_sent": False,
         "last_hz": 0.0,
         "audio_on": False,
+        "theme_idx": int(FACE_THEME_DEFAULT),
+        "btn_a": make_button(now_ms),
     }
     if hal is not None and hasattr(hal, "set_backlight"):
         hal.set_backlight(True)
@@ -155,19 +165,22 @@ def _paint(state, now_ms=None):
     prev_mode = state.get("mode")
     state["mode"] = mode
     identity = "%s %s" % (state["fw_name"], state["fw_version"])
-    fr = face_frame(elapsed, mode=mode, identity=identity)
+    theme_idx = int(state.get("theme_idx") if state.get("theme_idx") is not None else FACE_THEME_DEFAULT)
+    fr = face_frame(elapsed, mode=mode, identity=identity, theme_idx=theme_idx)
     state["last_face"] = fr
     state["led_on"] = bool(fr.get("eyes_open"))
     hal = state.get("hal")
     if hal is None:
         return fr
 
-    # Idle: static side strip; re-paint LCD on wink and/or hair-bar marquee motion.
+    # Idle: static side strip; re-paint LCD on wink, theme, and/or marquee motion.
     eye_key = (fr.get("left_open", True), fr.get("right_open", True))
     banner_x = fr.get("banner_x")
+    theme_key = fr.get("theme_idx")
     face_changed = (
         mode != prev_mode
         or state.get("_idle_eye_key") != eye_key
+        or state.get("_theme_key") != theme_key
         or not state.get("_idle_painted")
     )
     banner_changed = state.get("_banner_x") != banner_x
@@ -182,9 +195,9 @@ def _paint(state, now_ms=None):
 
     prev = state.get("_side_key")
     if mode == "idle":
-        side_key = ("idle",)
+        side_key = ("idle", theme_key, fr["side"][0] if fr.get("side") else None)
     else:
-        side_key = (mode, fr.get("eyes_open"), fr["side"][0] if fr.get("side") else None)
+        side_key = (mode, theme_key, fr.get("eyes_open"), fr["side"][0] if fr.get("side") else None)
     if prev != side_key and hasattr(hal, "set_side_leds"):
         hal.set_side_leds(fr["side"])
         state["_side_key"] = side_key
@@ -205,6 +218,7 @@ def _paint(state, now_ms=None):
     else:
         state["_idle_painted"] = False
         state["_idle_eye_key"] = None
+    state["_theme_key"] = theme_key
     state["_banner_x"] = banner_x
     return fr
 
@@ -272,10 +286,35 @@ def _drive_edge(state, now_ms=None):
 def _poll_inputs(state, now_ms=None):
     t = _now(state, now_ms)
     cfg = state["cfg"]
+    hal = state.get("hal")
+
+    # Left button (Button A): cycle face/side theme.
+    if "btn_a" not in state:
+        state["btn_a"] = make_button(t)
+    pressed = 0
+    if hal is not None and hasattr(hal, "read_button_a"):
+        try:
+            pressed = 1 if hal.read_button_a() else 0
+        except Exception:
+            pressed = 0
+    if tick_button_press(state["btn_a"], pressed, t):
+        state["theme_idx"] = next_theme_index(state.get("theme_idx") or 0)
+        # Force full face + side repaint on the next _paint.
+        state["_idle_painted"] = False
+        state["_side_key"] = None
+        state["_theme_key"] = None
+        name = None
+        try:
+            from face import theme_at
+
+            name = theme_at(state["theme_idx"]).get("name")
+        except Exception:
+            name = str(state["theme_idx"])
+        _emit(state, "theme=%s idx=%s" % (name, state["theme_idx"]))
+
     # Skip PIR work entirely when greet disabled (floating pin cannot peep)
     if int(cfg.get("greet") or 0) != 1:
         return
-    hal = state.get("hal")
     pir = 0
     if hal is not None and hasattr(hal, "read_pir"):
         pir = hal.read_pir()

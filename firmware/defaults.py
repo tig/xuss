@@ -58,6 +58,11 @@ PROFILES = {
 # --- M5GO pins (docs.m5stack.com M5GO v2.7) ---
 SIDE_LED_PIN = 15
 SIDE_LED_COUNT = 10
+# Front buttons (active-low, external pull-ups). Left = Button A.
+BUTTON_A_PIN = 39
+BUTTON_B_PIN = 38
+BUTTON_C_PIN = 37
+BTN_DEBOUNCE_MS = 250
 
 LCD_SPI_ID = 2
 LCD_SCK_PIN = 18
@@ -127,3 +132,48 @@ FACE_BANNER_GAP_PX = 64  # quiet gap before the text re-enters
 FACE_BANNER_SCALE = 2  # 5x7 font → 10x14 in the 28px bar
 FACE_BANNER_BAR_H = 28
 FACE_BANNER_FG = (200, 230, 255)  # light blue on dark hair
+# Left-button color cycle (Button A). Side LEDs match; black = side off.
+# Each row: name, eye, bar, bg, banner_fg, side (side black ⇒ all-off).
+FACE_THEMES = (
+    {
+        "name": "blue",
+        "eye": (40, 140, 255),
+        "bar": (0, 50, 120),
+        "bg": (0, 0, 20),
+        "banner_fg": (200, 230, 255),
+        "side": (40, 140, 255),
+    },
+    {
+        "name": "orange",
+        "eye": (255, 140, 0),
+        "bar": (140, 60, 0),
+        "bg": (20, 8, 0),
+        "banner_fg": (255, 220, 160),
+        "side": (255, 140, 0),
+    },
+    {
+        "name": "red",
+        "eye": (255, 48, 48),
+        "bar": (120, 0, 0),
+        "bg": (16, 0, 0),
+        "banner_fg": (255, 180, 180),
+        "side": (255, 48, 48),
+    },
+    {
+        "name": "green",
+        "eye": (40, 220, 80),
+        "bar": (0, 90, 40),
+        "bg": (0, 16, 0),
+        "banner_fg": (180, 255, 200),
+        "side": (40, 220, 80),
+    },
+    {
+        "name": "black",
+        "eye": (0, 0, 0),
+        "bar": (0, 0, 0),
+        "bg": (0, 0, 0),
+        "banner_fg": (28, 28, 28),
+        "side": (0, 0, 0),  # off
+    },
+)
+FACE_THEME_DEFAULT = 0  # blue

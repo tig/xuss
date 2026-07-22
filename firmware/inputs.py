@@ -1,6 +1,7 @@
 """ANGLE knob + PIR presence logic. Host-importable."""
 
 from defaults import (
+    BTN_DEBOUNCE_MS,
     KNOB_ADC_MAX,
     KNOB_ADC_MIN,
     KNOB_RPM_MAX,
@@ -99,3 +100,30 @@ def chirp_active(pres, now_ms):
     return int(pres.get("chirp_hz") or 0) > 0 and int(now_ms) < int(
         pres.get("greet_until_ms") or 0
     )
+
+
+def make_button(now_ms=0):
+    """Edge-detect state for a held digital button (1=pressed)."""
+    return {
+        "down": 0,
+        "last_edge_ms": int(now_ms) - int(BTN_DEBOUNCE_MS) - 1,
+    }
+
+
+def tick_button_press(btn, pressed, now_ms, debounce_ms=None):
+    """Return True once on press edge (0→1), debounced against bounce/hold.
+
+    ``pressed`` is 1/True while the physical button is down (active).
+    Holding does not re-fire; release then press does.
+    """
+    if debounce_ms is None:
+        debounce_ms = int(BTN_DEBOUNCE_MS)
+    now = int(now_ms)
+    p = 1 if pressed else 0
+    was = int(btn.get("down") or 0)
+    btn["down"] = p
+    if p and not was:
+        if now - int(btn.get("last_edge_ms") or 0) >= int(debounce_ms):
+            btn["last_edge_ms"] = now
+            return True
+    return False
