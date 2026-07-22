@@ -367,10 +367,11 @@ def make_board_hal():
         def show_face(self, frame) -> None:
             if not lcd_ok:
                 return
-            open_eyes = bool(frame.get("eyes_open", True))
+            left_open = bool(frame.get("left_open", frame.get("eyes_open", True)))
+            right_open = bool(frame.get("right_open", frame.get("eyes_open", True)))
             mode = frame.get("mode", "idle")
-            # Idle: draw once per mode only (never full-screen thrash / brownout loop)
-            key = (mode, open_eyes if mode != "idle" else True)
+            # Re-draw when mode or either eye changes (idle wink every 10s).
+            key = (mode, left_open, right_open)
             if key == _last_face_key[0]:
                 return
             _last_face_key[0] = key
@@ -394,17 +395,20 @@ def make_board_hal():
                 except Exception:
                     bar = (0, 50, 120)
 
-            # Avoid full-frame fill when possible — only clear once per mode change
+            # Full clear on eye-state change keeps wink edges clean (rare: 1/10s idle).
             lcd.fill(bg)
             lcd.fill_rect(0, 0, LCD_WIDTH, 28, bar)
-            if open_eyes:
-                lcd.fill_rect(70, 90, 70, 50, eye)
-                lcd.fill_rect(90, 105, 24, 24, bg)
-                lcd.fill_rect(180, 90, 70, 50, eye)
-                lcd.fill_rect(200, 105, 24, 24, bg)
-            else:
-                lcd.fill_rect(70, 110, 70, 10, eye)
-                lcd.fill_rect(180, 110, 70, 10, eye)
+
+            def _draw_eye(x, open_):
+                if open_:
+                    lcd.fill_rect(x, 90, 70, 50, eye)
+                    lcd.fill_rect(x + 20, 105, 24, 24, bg)
+                else:
+                    # Closed lid / wink line
+                    lcd.fill_rect(x, 110, 70, 10, eye)
+
+            _draw_eye(70, left_open)
+            _draw_eye(180, right_open)
             # Smile: simple upward arc from filled bars (readable on camera)
             if mode == "idle":
                 # Softer blue mouth than full eye fill

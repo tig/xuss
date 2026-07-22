@@ -162,8 +162,14 @@ def _paint(state, now_ms=None):
     if hal is None:
         return fr
 
-    # Idle: paint once. Active modes: allow chase (throttled by face.side changes).
-    if mode == "idle" and prev_mode == "idle" and state.get("_idle_painted"):
+    # Idle: static side strip, but re-paint LCD when wink/blink eye state changes.
+    eye_key = (fr.get("left_open", True), fr.get("right_open", True))
+    if (
+        mode == "idle"
+        and prev_mode == "idle"
+        and state.get("_idle_painted")
+        and state.get("_idle_eye_key") == eye_key
+    ):
         return fr
 
     prev = state.get("_side_key")
@@ -178,8 +184,10 @@ def _paint(state, now_ms=None):
         hal.show_face(fr)
     if mode == "idle":
         state["_idle_painted"] = True
+        state["_idle_eye_key"] = eye_key
     else:
         state["_idle_painted"] = False
+        state["_idle_eye_key"] = None
     return fr
 
 

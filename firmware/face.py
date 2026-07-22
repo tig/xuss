@@ -10,6 +10,9 @@ from defaults import (
     FACE_IDLE_DIM,
     FACE_IDLE_SIDE_ON,
     FACE_SING_COLOR,
+    FACE_WINK_EYE,
+    FACE_WINK_MS,
+    FACE_WINK_PERIOD_MS,
     SIDE_LED_COUNT,
 )
 
@@ -33,13 +36,46 @@ def _mode_color(mode):
     return FACE_EYE_COLOR
 
 
-def eyes_open(t_ms, mode="idle"):
-    """Blink only when active (singing/driving). Idle stays open — avoids full LCD redraw thrash."""
-    if mode == "idle" or mode == "fault":
-        return True
+def _idle_winking(t_ms):
+    """True during the brief wink window once per FACE_WINK_PERIOD_MS."""
+    period = int(FACE_WINK_PERIOD_MS)
+    wink = int(FACE_WINK_MS)
+    if period <= 0 or wink <= 0:
+        return False
+    if wink >= period:
+        wink = period // 4 or 1
+    phase = int(t_ms) % period
+    # Wink near the end of each period so first seconds after boot stay open.
+    return phase >= (period - wink)
+
+
+def eye_state(t_ms, mode="idle"):
+    """Return (left_open, right_open). Time-based only.
+
+    Idle: both open, then a one-eye wink every FACE_WINK_PERIOD_MS.
+    Singing/driving: both eyes blink together (prior active path).
+    Fault: both open.
+    """
+    if mode == "fault":
+        return (True, True)
+    if mode == "idle":
+        if not _idle_winking(t_ms):
+            return (True, True)
+        which = str(FACE_WINK_EYE or "right").lower()
+        if which == "left":
+            return (False, True)
+        return (True, False)
+    # active modes: bilateral blink
     phase = int(t_ms) % int(FACE_BLINK_PERIOD_MS)
     close_at = int(FACE_BLINK_PERIOD_MS) - int(FACE_BLINK_MS)
-    return phase < close_at
+    open_ = phase < close_at
+    return (open_, open_)
+
+
+def eyes_open(t_ms, mode="idle"):
+    """Both eyes open (compat). False if either is closed (blink or wink)."""
+    left, right = eye_state(t_ms, mode=mode)
+    return bool(left and right)
 
 
 def side_colors(t_ms, mode="idle"):
@@ -70,10 +106,13 @@ def side_colors(t_ms, mode="idle"):
 
 
 def frame(t_ms, mode="idle", identity="XUSS"):
+    left, right = eye_state(t_ms, mode=mode)
     return {
         "mode": mode,
         "identity": identity,
-        "eyes_open": eyes_open(t_ms, mode=mode),
+        "eyes_open": bool(left and right),
+        "left_open": bool(left),
+        "right_open": bool(right),
         "side": side_colors(t_ms, mode=mode),
         "t_ms": int(t_ms),
     }

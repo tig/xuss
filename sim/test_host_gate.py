@@ -111,6 +111,53 @@ def test_idle_face_is_blue_and_side_leds_on():
     assert c0[2] >= c0[0] and c0[2] >= c0[1]
 
 
+def test_idle_wink_every_10_seconds():
+    """Idle face winks one eye once per FACE_WINK_PERIOD_MS (time-based)."""
+    face = _load("face")
+    defaults = _load("defaults")
+    period = int(defaults.FACE_WINK_PERIOD_MS)
+    wink = int(defaults.FACE_WINK_MS)
+    assert period == 10000
+    # Just after boot: both open
+    left0, right0 = face.eye_state(0, mode="idle")
+    assert left0 and right0
+    # Mid-period: still open
+    left_m, right_m = face.eye_state(period // 2, mode="idle")
+    assert left_m and right_m
+    # In wink window near end of period: right eye closed by default
+    t_wink = period - (wink // 2)
+    left_w, right_w = face.eye_state(t_wink, mode="idle")
+    assert left_w is True and right_w is False
+    fr = face.frame(t_wink, mode="idle")
+    assert fr["left_open"] is True and fr["right_open"] is False
+    assert fr["eyes_open"] is False
+    # Next period open again
+    left_n, right_n = face.eye_state(period + 1, mode="idle")
+    assert left_n and right_n
+
+
+def test_idle_wink_triggers_repaint():
+    """main._paint must re-call show_face when idle eye state flips."""
+    main = _load("main")
+    defaults = _load("defaults")
+    link_mod = _load("link")
+    fake = _load_sim("hal_double").FakeHal()
+    link = link_mod.MemoryLink()
+    state = main.init(hal=fake, now_ms=0, link=link, riff_data=b"")
+    n0 = len(fake.face_history)
+    # Steady idle — no wink yet: may paint at most once more
+    main.tick(state, now_ms=100)
+    main.tick(state, now_ms=200)
+    n_mid = len(fake.face_history)
+    # Enter wink window
+    t_wink = int(defaults.FACE_WINK_PERIOD_MS) - 50
+    main.tick(state, now_ms=t_wink)
+    assert len(fake.face_history) > n_mid
+    last = fake.face_history[-1]
+    assert last.get("right_open") is False
+    assert last.get("left_open") is True
+
+
 def test_lcd_rgb565_swaps_for_bgr_panel():
     """M5GO MADCTL BGR: blue-heavy RGB must not pack as orange-heavy wire word."""
     hb = _load("hal_board")

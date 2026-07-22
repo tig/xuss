@@ -106,6 +106,10 @@ CONFIG_VERSION = 1
 FACE_CHASE_MS = 120
 FACE_BLINK_PERIOD_MS = 2800
 FACE_BLINK_MS = 140
+# Idle wink: one eye closes briefly every 10s (time-based, not tick-based).
+FACE_WINK_PERIOD_MS = 10000
+FACE_WINK_MS = 220
+FACE_WINK_EYE = "right"  # which eye closes during idle wink
 FACE_EYE_COLOR = (40, 140, 255)  # idle eyes / smile
 FACE_SING_COLOR = (90, 190, 255)  # singing — bright blue (was orange)
 FACE_DRIVE_COLOR = (20, 90, 230)  # driving DUT — deep blue (was green)
