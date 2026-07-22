@@ -333,6 +333,9 @@ def make_board_hal():
         _last_tach[0] = (0.0, 0)
 
     def _spk_to_dac():
+        # Keep an existing DAC session — re-init every chunk killed song playback.
+        if voice_mode[0] == "dac" and spk_dac[0] is not None:
+            return
         _spk_off()
         try:
             spk_dac[0] = DAC(Pin(SPEAKER_PIN))
@@ -614,18 +617,18 @@ def make_board_hal():
 
             machine.reset()
 
-        def write_dac_samples(self, data, fade_out=True, sample_hz=None) -> None:
+        def write_dac_samples(self, data, fade_out=True, sample_hz=None) -> bool:
             """Play u8 mono PCM. Busy-wait on ticks_us (sleep_us is too jittery).
 
-            fade_out=False for mid-stream song chunks (no end ramp). True for
-            boot riff / last chunk style (ease to mid then park).
+            fade_out=False for mid-stream song chunks (no end ramp / no amp tear-down).
+            Returns False if DAC could not be opened.
             """
             if not data:
-                return
+                return True
             _spk_to_dac()
             dac = spk_dac[0]
             if dac is None:
-                return
+                return False
             # 11,025 Hz => ~90.7 us/sample. Prefer slightly long over short (less harsh).
             hz = int(sample_hz if sample_hz is not None else BOOT_RIFF_HZ)
             period = max(1, (1000000 + hz // 2) // hz)
@@ -671,15 +674,20 @@ def make_board_hal():
                             pass
                     time.sleep_ms(hold_ms)
                     _spk_off()
+                return True
             except Exception:
                 if fade_out:
                     _spk_off()
+                return False
 
         def play_pcm_file(self, path, stop_reader=None, sample_hz=None, chunk=None) -> str:
             """Stream u8 mono file. Returns 'done' | 'stopped' | 'missing' | 'error'.
 
             stop_reader() -> truthy while middle button held. After the start
             press is released, the next press stops playback.
+
+            Opens the DAC once and keeps it for the whole song (re-init per
+            chunk was silent on metal).
             """
             from defaults import FIRST_SONG_CHUNK, FIRST_SONG_HZ
 
@@ -697,15 +705,40 @@ def make_board_hal():
                 f = open(path, "rb")
             except Exception:
                 return "missing"
+
+            # One DAC session for the whole stream.
+            _spk_to_dac()
+            dac = spk_dac[0]
+            if dac is None:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+                return "error"
+
+            hz = int(sample_hz)
+            period = max(1, (1000000 + hz // 2) // hz)
+            poll_every = 64  # check stop ~every 6 ms
             released = False
             outcome = "done"
             got_any = False
             try:
                 # Drain the press that started us before arming stop.
                 if stop_reader is not None:
+                    t_wait = time.ticks_ms()
                     while stop_reader():
                         time.sleep_ms(20)
+                        # safety: don't hang forever if pin stuck
+                        if time.ticks_diff(time.ticks_ms(), t_wait) > 3000:
+                            break
                     released = True
+                    time.sleep_ms(50)  # debounce after release
+
+                # Brief mid bias so amp wakes before first sample
+                for _ in range(32):
+                    dac.write(128)
+
+                t_next = time.ticks_us()
                 while True:
                     if stop_reader is not None and released and stop_reader():
                         outcome = "stopped"
@@ -715,8 +748,29 @@ def make_board_hal():
                         outcome = "done" if got_any else "missing"
                         break
                     got_any = True
-                    # Mid-stream chunks: no end fade (dac_idle parks after).
-                    self.write_dac_samples(data, fade_out=False, sample_hz=sample_hz)
+                    n = len(data)
+                    for i in range(n):
+                        if (
+                            stop_reader is not None
+                            and released
+                            and (i % poll_every) == 0
+                            and stop_reader()
+                        ):
+                            outcome = "stopped"
+                            data = b""
+                            break
+                        b = data[i]
+                        v = ord(b) if isinstance(b, str) else (int(b) & 0xFF)
+                        dac.write(v)
+                        t_next = time.ticks_add(t_next, period)
+                        while True:
+                            d = time.ticks_diff(t_next, time.ticks_us())
+                            if d <= 0:
+                                if d < -period * 4:
+                                    t_next = time.ticks_us()
+                                break
+                    if outcome == "stopped":
+                        break
             except Exception:
                 outcome = "error"
             finally:
@@ -735,8 +789,7 @@ def make_board_hal():
             dac = spk_dac[0]
             if dac is not None:
                 try:
-                    _spk_to_dac()
-                    for _ in range(64):
+                    for _ in range(128):
                         dac.write(128)
                 except Exception:
                     pass
