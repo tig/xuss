@@ -91,27 +91,22 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
     if riff_on and riff_data:
         if hasattr(hal, "write_dac_samples"):
             try:
-                hal.write_dac_samples(riff_data)
+                # fade_out=True: ease to mid, hold, ramp to 0; keeps DAC session
+                hal.write_dac_samples(riff_data, fade_out=True)
             except Exception:
                 pass
         if hasattr(hal, "dac_idle"):
             try:
+                # Soft park only — do NOT emergency_silence / GPIO remux (harsh cut
+                # + kills DAC reopen until hard reset; see measure_dac).
                 hal.dac_idle()
             except Exception:
                 pass
-    # Triple park after riff — DAC mux on ESP32 can leave the amp hot once
-    for _ in range(3):
-        if hasattr(hal, "park_outputs"):
-            try:
-                hal.park_outputs()
-            except Exception:
-                pass
-    try:
-        from hal_board import emergency_silence
-
-        emergency_silence()
-    except Exception:
-        pass
+    elif hasattr(hal, "park_outputs"):
+        try:
+            hal.park_outputs()
+        except Exception:
+            pass
     return state
 
 
@@ -285,6 +280,8 @@ def _paint(state, now_ms=None):
     identity = "%s %s" % (state["fw_name"], state["fw_version"])
     theme_idx = int(state.get("theme_idx") if state.get("theme_idx") is not None else FACE_THEME_DEFAULT)
     fr = face_frame(elapsed, mode=mode, identity=identity, theme_idx=theme_idx)
+    # Play glyph when not actively streaming; pause glyph while song blocks.
+    fr["btn_b_icon"] = "pause" if state.get("song_playing") else "play"
     state["last_face"] = fr
     state["led_on"] = bool(fr.get("eyes_open"))
     hal = state.get("hal")
@@ -295,10 +292,12 @@ def _paint(state, now_ms=None):
     eye_key = (fr.get("left_open", True), fr.get("right_open", True))
     banner_x = fr.get("banner_x")
     theme_key = fr.get("theme_idx")
+    b_icon = fr.get("btn_b_icon")
     face_changed = (
         mode != prev_mode
         or state.get("_idle_eye_key") != eye_key
         or state.get("_theme_key") != theme_key
+        or state.get("_btn_b_icon") != b_icon
         or not state.get("_idle_painted")
     )
     banner_changed = state.get("_banner_x") != banner_x
@@ -337,6 +336,7 @@ def _paint(state, now_ms=None):
         state["_idle_painted"] = False
         state["_idle_eye_key"] = None
     state["_theme_key"] = theme_key
+    state["_btn_b_icon"] = b_icon
     state["_banner_x"] = banner_x
     return fr
 

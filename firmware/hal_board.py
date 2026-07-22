@@ -556,6 +556,70 @@ def make_board_hal():
             )
             lcd.blit_rgb565(0, 0, _banner_w, _banner_h, _banner_buf)
 
+        def _draw_text_line(self, text, x, y, fg, scale=2):
+            """5x7 bitmap text via fill_rect (uses banner glyphs)."""
+            from banner import glyph
+
+            tx = int(x)
+            adv = (5 + 1) * int(scale)
+            for ch in str(text):
+                cols = glyph(ch)
+                for col, bits in enumerate(cols):
+                    for row in range(7):
+                        if bits & (1 << row):
+                            lcd.fill_rect(
+                                tx + col * scale,
+                                y + row * scale,
+                                scale,
+                                scale,
+                                fg,
+                            )
+                tx += adv
+            return tx
+
+        def _draw_play_icon(self, cx, cy, fg):
+            # Right-pointing triangle
+            for row in range(16):
+                w = row if row < 8 else (15 - row)
+                lcd.fill_rect(cx, cy - 8 + row, 2 + w, 1, fg)
+
+        def _draw_pause_icon(self, cx, cy, fg):
+            lcd.fill_rect(cx, cy - 8, 5, 16, fg)
+            lcd.fill_rect(cx + 10, cy - 8, 5, 16, fg)
+
+        def _draw_gear_icon(self, cx, cy, fg):
+            # Simple gear: hub + 8 teeth
+            lcd.fill_rect(cx - 4, cy - 4, 9, 9, fg)
+            for dx, dy in (
+                (0, -9),
+                (0, 9),
+                (-9, 0),
+                (9, 0),
+                (-6, -6),
+                (6, -6),
+                (-6, 6),
+                (6, 6),
+            ):
+                lcd.fill_rect(cx + dx - 2, cy + dy - 2, 5, 5, fg)
+
+        def _draw_button_labels(self, bg, fg, b_icon="play"):
+            """Labels just above physical A / B / C (bottom of 320x240 panel)."""
+            # Clear label strip so theme changes stay clean
+            y_strip = 214
+            lcd.fill_rect(0, y_strip, LCD_WIDTH, LCD_HEIGHT - y_strip, bg)
+            # A — "color" centered ~x=53 (left third)
+            label = "color"
+            scale = 2
+            tw = len(label) * (5 + 1) * scale
+            self._draw_text_line(label, 53 - tw // 2, 218, fg, scale=scale)
+            # B — play or pause glyph ~center
+            if b_icon == "pause":
+                self._draw_pause_icon(152, 228, fg)
+            else:
+                self._draw_play_icon(152, 228, fg)
+            # C — gear ~right third
+            self._draw_gear_icon(267, 228, fg)
+
         def show_banner(self, frame) -> None:
             """Hair-bar marquee only: buffer compose + single blit."""
             if not lcd_ok:
@@ -572,6 +636,7 @@ def make_board_hal():
                 right_open,
                 frame.get("banner_x"),
                 frame.get("theme_idx"),
+                frame.get("btn_b_icon"),
             )
 
         def show_face(self, frame) -> None:
@@ -582,14 +647,20 @@ def make_board_hal():
             mode = frame.get("mode", "idle")
             banner_x = frame.get("banner_x")
             theme_idx = frame.get("theme_idx")
+            b_icon = frame.get("btn_b_icon") or "play"
             # Re-draw when mode, eyes, theme, or marquee position changes.
-            key = (mode, left_open, right_open, banner_x, theme_idx)
+            key = (mode, left_open, right_open, banner_x, theme_idx, b_icon)
             if key == _last_face_key[0]:
                 return
             prev = _last_face_key[0]
             _last_face_key[0] = key
 
             eye, bar, bg, banner_fg = self._frame_palette(frame)
+            # Label ink: light on dark themes, dark on white (black theme)
+            if sum(bg) > 400:
+                lab_fg = (20, 20, 20)
+            else:
+                lab_fg = (220, 220, 230)
 
             # Marquee-only change: avoid full face thrash (eyes/smile stay).
             if (
@@ -598,6 +669,7 @@ def make_board_hal():
                 and prev[1] == left_open
                 and prev[2] == right_open
                 and prev[4] == theme_idx
+                and (len(prev) < 6 or prev[5] == b_icon)
                 and prev[3] != banner_x
             ):
                 self._draw_banner_bar(frame, bar, banner_fg=banner_fg)
@@ -628,6 +700,7 @@ def make_board_hal():
             lcd.fill_rect(202, 175, 18, 10, mouth)
             lcd.fill_rect(115, 185, 90, 10, mouth)
             lcd.fill_rect(125, 195, 70, 8, mouth)
+            self._draw_button_labels(bg, lab_fg, b_icon=b_icon)
 
         def read_button_a(self) -> int:
             """1 if left button held (active-low), else 0."""
@@ -699,9 +772,15 @@ def make_board_hal():
             n = len(data)
             fade_n = 0
             if fade_out:
-                fade_ms = int(BOOT_RIFF_FADE_MS) if BOOT_RIFF_FADE_MS else 400
+                fade_ms = int(BOOT_RIFF_FADE_MS) if BOOT_RIFF_FADE_MS else 500
                 fade_n = min(n, max(1, (hz * fade_ms) // 1000))
-            hold_ms = int(BOOT_RIFF_HOLD_MID_MS) if BOOT_RIFF_HOLD_MID_MS else 50
+            hold_ms = int(BOOT_RIFF_HOLD_MID_MS) if BOOT_RIFF_HOLD_MID_MS else 120
+            try:
+                from defaults import BOOT_RIFF_TAIL_TO_ZERO_MS
+
+                tail_ms = int(BOOT_RIFF_TAIL_TO_ZERO_MS)
+            except Exception:
+                tail_ms = 150
             try:
                 if fade_out:
                     for _ in range(16):
@@ -716,7 +795,10 @@ def make_board_hal():
                     if fade_n and i >= n - fade_n:
                         step = i - (n - fade_n) + 1
                         remain = fade_n - step + 1
-                        scale = (remain * remain) // fade_n
+                        # Cubic-ish ease: remain^3 / fade_n^2 for softer tail
+                        scale = (remain * remain * remain) // (fade_n * fade_n)
+                        if scale > fade_n:
+                            scale = fade_n
                         v = 128 + ((v - 128) * scale) // fade_n
                     _pcm_write_sample(v)
                     t_next = time.ticks_add(t_next, period)
@@ -727,13 +809,23 @@ def make_board_hal():
                                 t_next = time.ticks_us()
                             break
                 if fade_out:
+                    # Hold digital silence (u8 mid) then ramp mid → 0 (no cliff)
                     for _ in range(max(1, (hz * hold_ms) // 1000)):
                         _pcm_write_sample(128)
                         t_next = time.ticks_add(t_next, period)
                         while time.ticks_diff(t_next, time.ticks_us()) > 0:
                             pass
-                    time.sleep_ms(hold_ms)
-                    # Soft park — keep DAC for Button-B song (same quality as boot riff)
+                    tail_n = max(1, (hz * tail_ms) // 1000)
+                    for j in range(tail_n):
+                        # linear 128 → 0
+                        v = 128 - (128 * (j + 1)) // tail_n
+                        if v < 0:
+                            v = 0
+                        _pcm_write_sample(v)
+                        t_next = time.ticks_add(t_next, period)
+                        while time.ticks_diff(t_next, time.ticks_us()) > 0:
+                            pass
+                    # Soft park — keep DAC for Button-B song
                     _spk_off()
                 return True
             except Exception:
@@ -908,15 +1000,21 @@ def make_board_hal():
                                 fg,
                             )
                 tx += adv
+            # Playing → pause glyph on B; color + gear still shown
+            self._draw_button_labels(bg, fg, b_icon="pause")
             _last_face_key[0] = ("now_playing", title)
 
         def dac_idle(self) -> None:
             """Ease toward quiet without destroying DAC session (measure_dac)."""
             try:
-                for _ in range(64):
+                # Short mid hold then ramp to 0 (avoids 128→0 click)
+                for _ in range(48):
                     _pcm_write_sample(128)
-                for _ in range(64):
-                    _pcm_write_sample(0)
+                for j in range(96):
+                    v = 128 - (128 * (j + 1)) // 96
+                    if v < 0:
+                        v = 0
+                    _pcm_write_sample(v)
             except Exception:
                 pass
             _spk_off()  # soft if DAC held

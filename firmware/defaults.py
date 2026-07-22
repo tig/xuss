@@ -86,8 +86,10 @@ BOOT_RIFF_ENABLE = 1
 BOOT_RIFF_PATH = "boot_riff.u8.raw"
 BOOT_RIFF_HZ = 11025
 # Software ease-out on top of the asset's own fade (ms of tail → mid 128)
-BOOT_RIFF_FADE_MS = 400
-BOOT_RIFF_HOLD_MID_MS = 50
+BOOT_RIFF_FADE_MS = 500
+BOOT_RIFF_HOLD_MID_MS = 120
+# After mid hold, ramp mid→0 so soft park is not a cliff (keeps DAC alive)
+BOOT_RIFF_TAIL_TO_ZERO_MS = 150
 # Host path relative to repo root for tests
 BOOT_RIFF_HOST = "assets/boot-riff.u8.raw"
 # Full *First* song (Button B toggle). Same format as boot riff; stream from FS.
