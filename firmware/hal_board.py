@@ -688,11 +688,18 @@ def make_board_hal():
             if chunk is None:
                 chunk = FIRST_SONG_CHUNK
             try:
+                st = __import__("os").stat(path)
+                if int(st[6]) <= 0:
+                    return "missing"
+            except Exception:
+                return "missing"
+            try:
                 f = open(path, "rb")
             except Exception:
                 return "missing"
             released = False
             outcome = "done"
+            got_any = False
             try:
                 # Drain the press that started us before arming stop.
                 if stop_reader is not None:
@@ -705,9 +712,10 @@ def make_board_hal():
                         break
                     data = f.read(int(chunk))
                     if not data:
-                        outcome = "done"
+                        outcome = "done" if got_any else "missing"
                         break
-                    # Last chunk of a natural end gets a short fade via dac_idle after.
+                    got_any = True
+                    # Mid-stream chunks: no end fade (dac_idle parks after).
                     self.write_dac_samples(data, fade_out=False, sample_hz=sample_hz)
             except Exception:
                 outcome = "error"
