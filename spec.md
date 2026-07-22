@@ -98,7 +98,7 @@ You will see:
 - **Front button states** (which of A / B / C are currently held)
 - Other built-in board readings when available (for example free memory)
 
-Numbers update **several times per second** so you can tilt the device and watch the motion values change. Labels stay put; only the numbers refresh.
+Numbers update about **ten times per second** so you can tilt the device and watch the motion values change. Labels stay put; only the numbers refresh.
 
 | Control on Details | Effect |
 |---|---|
@@ -145,20 +145,16 @@ This version of Xuss is a **friendly face and music demo** on the M5GO. It is no
 
 ## 1. Product intent (for implementers)
 
-Rebuild the experience in the User's Manual on an M5GO v2.7, driven from this spec.
+Rebuild the experience in the User's Manual on an M5GO v2.7, driven from this spec:
 
-| In scope | Out of scope (abandoned for this product) |
-|---|---|
-| Boot musical greeting from *First* | Live ANGLE-knob RPM control |
-| Idle face, wink, scrolling hair banner | PIR "greet once" presence chirps |
-| Five color themes (including black/white) | Grove modules on the Details screen |
-| Full *First* play / pause / resume / no loop | Auto-repeating music |
-| Now Playing UI while full-song audio is active | Multi-track library / file browser |
-| Details screen: firmware + built-in core sensors | Servo head, mic tricks, fixture/L2 bench drone role |
-| Three front buttons with on-screen hints | External DUT tach training as a user feature |
-| USB serial identity + escape hatch for development | |
-
-Former "bench instrument" verbs (edge RPM profiles, tach impersonation, knob, greet) are **not** product requirements for Rev 0.3. Do not resurrect them unless a later rev of this document says so.
+- Boot musical greeting from *First*
+- Idle face, time-based wink, scrolling hair banner
+- Five color themes (including black/white)
+- Full *First* play / pause / resume / no loop
+- Now Playing UI while full-song audio is active
+- Details screen: firmware + built-in core sensors only
+- Three front buttons with on-screen hints
+- USB serial identity + escape hatch for development
 
 ## 2. Readiness layers (definition of done)
 
@@ -196,12 +192,12 @@ Boot riff end must not click or hard-cut into silence; ease out cleanly.
 ### 4.2 Idle face
 
 - Eyes, smile, and theme colors on the IPS panel.
-- Hair banner scrolls smoothly right → left with text **`Xuss; built with Silico`** (note the semicolon).
-- Right-eye wink on a **time-based** ~10 s period (not "every N control ticks").
+- Hair banner scrolls smoothly right → left with text **`Xuss; built with Silico`** (note the semicolon). Banner motion updates only the hair-bar region (not a full-panel redraw every step).
+- Right-eye wink on a **time-based** ~10 s period (not "every N control ticks"). A wink **repaints only the affected eye** (open ↔ closed). It must not clear or redraw the whole screen, the other eye, the smile, the banner, or the button hints.
 - Side LEDs match the active theme; **black** theme forces side LEDs fully off and uses a white background with black face features.
 - Bottom of the panel shows persistent hints: **color** / play-or-pause glyph / gear glyph.
 
-Face animation timing is wall-clock based, never "tick count" based.
+Face animation timing is wall-clock based, never "tick count" based. Prefer regional updates (eye, banner strip, value fields) over full-frame fills whenever only part of the picture changed.
 
 ### 4.3 Themes (Button A)
 
@@ -238,14 +234,14 @@ Mute (if exposed on the serial parameter table) blocks starting playback and rep
 - From face while song is **playing**: **pause first**, then open Details.
 - While Details is already visible: Button C is a **no-op**.
 - Details shows firmware identity at the top and live built-in sensor values beneath.
-- Sensor values refresh live enough to track a hand tilt. A **~500 ms** interval is a fine default; faster is welcome when partial updates stay smooth (see multi-tasking). Labels and chrome are stable; only value fields update (partial screen update, not a full-panel flash every sample).
+- Sensor values refresh every **100 ms** (~10 Hz). Labels and chrome are stable; only value fields update (partial screen update, not a full-panel flash every sample).
 - Required readings when hardware is present: IMU acceleration, rotation rate, IMU temperature; front button levels; optional core extras (e.g. free memory) if cheap to obtain.
 
 ### 4.6 Button map (summary)
 
 | Button | Face | Playing | Details |
 |---|---|---|---|
-| A (left) | Next theme | (unreachable while audio owns the loop unless multi-tasking yields; see §5) | Exit to face, no theme change |
+| A (left) | Next theme | (see multi-tasking §5) | Exit to face, no theme change |
 | B (middle) | Play / resume | Pause | Play / pause / resume (same rules) |
 | C (right) | Open Details | Pause, then Details | No-op |
 
@@ -272,8 +268,9 @@ The product simultaneously owns these concerns:
    - accept the escape-hatch commands on the link within a human-reasonable time, or document a short, bounded window if audio temporarily defers serial.
 3. **UI honesty during music.** While full-song audio is active, the visible UI may switch to **Now Playing** (that is product UI, not a crash). The idle face is allowed to pause its wink/banner during that presentation. Returning to face or Details when not playing is mandatory (§4.4).
 4. **Boot riff is special.** The short boot greeting may run as a one-shot near startup before the steady cooperative loop is fully spinning, provided identity is emitted first and the riff ends cleanly.
-5. **Details sampling.** About 2 Hz (~500 ms) is a solid default. Faster updates (down toward the control-loop period) are fine if value fields stay partial-updated and the UI remains responsive. Prefer partial updates for changing values so the panel does not full-refresh every sample.
-6. **Face motion is time-based.** Banner position and wink schedule derive from elapsed time, not from "how many loop iterations ran," so multi-tasking load does not change the look of the character more than briefly.
+5. **Details sampling.** Refresh sensor values every **100 ms**. Only value fields update; chrome stays put.
+6. **Face motion is time-based.** Banner position and wink schedule derive from elapsed time, not from "how many loop iterations ran."
+7. **Regional paints.** Wink → eye only. Banner scroll → hair bar only. Details numbers → value strips only. Full-screen clears are for mode changes (theme, enter/leave Details, Now Playing), not for routine animation.
 
 ### 5.3 Acceptance sketch for multi-tasking
 
@@ -315,7 +312,8 @@ Config persistence, if present, must fall back safely when the on-device image i
 | Themes | A cycles blue → orange → red → green → black → blue; sides match; black sides off / white bg | L1 |
 | Play / pause / resume | B starts full track; B pauses mid-song; B resumes (not restart); end does not loop | L1 |
 | Now Playing | While actively playing, screen shows title **First by Tig** | L1 |
-| Details | C opens sensor screen with firmware line; values move when device is tilted; ~0.5 s updates without full-screen flash | L1 |
+| Details | C opens sensor screen with firmware line; values move when device is tilted; ~100 ms updates without full-screen flash | L1 |
+| Wink paint | Idle wink changes only the right eye; rest of the face does not flash | L1 |
 | Details while playing | C pauses music then shows Details | L1 |
 | C on Details | Second C does nothing | L1 |
 | A on Details | Returns to face without theme change | L1 |
@@ -333,9 +331,7 @@ Implementation detail (DAC reuse, LCD endian, font bitmaps, partial blit strateg
 
 ## 10. Open items
 
-- [ ] Richer multi-tasking: keep the idle face animating *during* full-song audio (Now Playing becomes optional, not mandatory).
-- [ ] Front-panel or serial volume control exposed as a first-class user feature.
-- [ ] Optional higher-quality audio path if the board allows without harming boot reliability.
-- [ ] Playlist / multiple tracks (only if the single-track story stays obvious).
-- [ ] Servo pan/tilt head (v2): only if the face is not expressive enough on camera.
+- [ ] Keep the idle face animating during full-song audio (Now Playing optional).
+- [ ] User-facing volume control (front panel and/or serial).
+- [ ] Additional tracks only if the single-track story stays obvious.
 )
