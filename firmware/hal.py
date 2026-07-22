@@ -57,9 +57,18 @@ class Hal:
         """1 if middle front button (Button B) is pressed, else 0."""
         return 0
 
-    def play_pcm_file(self, path, stop_reader=None, sample_hz=None, chunk=None) -> str:
-        """Stream u8 mono PCM from path. Return done|stopped|missing|error."""
-        return "missing"
+    def play_pcm_file(
+        self, path, stop_reader=None, sample_hz=None, chunk=None, start_offset=0
+    ):
+        """Stream u8 mono PCM from path.
+
+        Returns (outcome, offset): done|paused|missing|error and resume byte offset.
+        """
+        return ("missing", 0)
+
+    def show_now_playing(self, title="First by Tig") -> None:
+        """Optional: static now-playing screen while song blocks the main loop."""
+        pass
 
     def write_text(self, path: str, text: str) -> None:
         raise NotImplementedError

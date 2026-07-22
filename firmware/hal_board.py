@@ -741,14 +741,18 @@ def make_board_hal():
                     _spk_off()
                 return False
 
-        def play_pcm_file(self, path, stop_reader=None, sample_hz=None, chunk=None) -> str:
-            """Stream u8 mono file. Returns 'done' | 'stopped' | 'missing' | 'error'.
+        def play_pcm_file(
+            self, path, stop_reader=None, sample_hz=None, chunk=None, start_offset=0
+        ):
+            """Stream u8 mono file from start_offset.
 
-            stop_reader() -> truthy while middle button held. After the start
-            press is released, the next press stops playback.
+            Returns (outcome, offset):
+              outcome: 'done' | 'paused' | 'missing' | 'error'
+              offset: byte position to resume (0 after natural end)
 
-            Opens the DAC once and keeps it for the whole song (re-init per
-            chunk was silent on metal).
+            stop_reader() while held after the start/resume press is released
+            → pause (not destroy progress). Natural EOF → done, offset 0
+            (no auto-repeat).
             """
             from defaults import FIRST_SONG_CHUNK, FIRST_SONG_HZ
 
@@ -756,58 +760,67 @@ def make_board_hal():
                 sample_hz = FIRST_SONG_HZ
             if chunk is None:
                 chunk = FIRST_SONG_CHUNK
+            start_offset = int(start_offset or 0)
+            if start_offset < 0:
+                start_offset = 0
             try:
                 st = __import__("os").stat(path)
-                if int(st[6]) <= 0:
-                    return "missing"
+                fsize = int(st[6])
+                if fsize <= 0:
+                    return ("missing", 0)
             except Exception:
-                return "missing"
+                return ("missing", 0)
+            if start_offset >= fsize:
+                return ("done", 0)
             try:
                 f = open(path, "rb")
             except Exception:
-                return "missing"
+                return ("missing", 0)
 
-            # One PCM session (DAC or PWM fallback) for the whole stream.
             if not _spk_to_dac():
                 try:
                     f.close()
                 except Exception:
                     pass
-                return "error"
+                return ("error", start_offset)
 
             hz = int(sample_hz)
             period = max(1, (1000000 + hz // 2) // hz)
-            poll_every = 64  # check stop ~every 6 ms
+            poll_every = 64
             released = False
             outcome = "done"
-            got_any = False
+            pos = start_offset
             try:
-                # Drain the press that started us before arming stop.
+                try:
+                    f.seek(start_offset)
+                except Exception:
+                    # MicroPython seek may need 0, whence
+                    f.seek(start_offset, 0)
+
                 if stop_reader is not None:
                     t_wait = time.ticks_ms()
                     while stop_reader():
                         time.sleep_ms(20)
-                        # safety: don't hang forever if pin stuck
                         if time.ticks_diff(time.ticks_ms(), t_wait) > 3000:
                             break
                     released = True
-                    time.sleep_ms(50)  # debounce after release
+                    time.sleep_ms(50)
 
-                # Brief mid bias so amp wakes before first sample
                 for _ in range(32):
                     _pcm_write_sample(128)
 
                 t_next = time.ticks_us()
                 while True:
                     if stop_reader is not None and released and stop_reader():
-                        outcome = "stopped"
+                        outcome = "paused"
                         break
                     data = f.read(int(chunk))
                     if not data:
-                        outcome = "done" if got_any else "missing"
+                        outcome = "done"
+                        pos = 0  # finished — do not auto-repeat
                         break
-                    got_any = True
                     n = len(data)
+                    i_done = 0
                     for i in range(n):
                         if (
                             stop_reader is not None
@@ -815,11 +828,13 @@ def make_board_hal():
                             and (i % poll_every) == 0
                             and stop_reader()
                         ):
-                            outcome = "stopped"
+                            outcome = "paused"
+                            i_done = i
                             break
                         b = data[i]
                         v = ord(b) if isinstance(b, str) else (int(b) & 0xFF)
                         _pcm_write_sample(v)
+                        i_done = i + 1
                         t_next = time.ticks_add(t_next, period)
                         while True:
                             d = time.ticks_diff(t_next, time.ticks_us())
@@ -827,7 +842,8 @@ def make_board_hal():
                                 if d < -period * 4:
                                     t_next = time.ticks_us()
                                 break
-                    if outcome == "stopped":
+                    pos = pos + i_done
+                    if outcome == "paused":
                         break
             except Exception:
                 outcome = "error"
@@ -840,7 +856,59 @@ def make_board_hal():
                     self.dac_idle()
                 except Exception:
                     pass
-            return outcome
+            if outcome == "done":
+                pos = 0
+            return (outcome, int(pos))
+
+        def show_now_playing(self, title="First by Tig") -> None:
+            """Static screen while First plays (blocking audio — face ticks pause)."""
+            if not lcd_ok:
+                return
+            from banner import glyph, char_advance_px
+
+            # Dark stage + light ink (R/B swap applied in _rgb565)
+            bg = (8, 8, 20)
+            fg = (240, 240, 255)
+            staff = (80, 100, 160)
+            lcd.fill(bg)
+            # Five staff lines
+            y0 = 70
+            for k in range(5):
+                y = y0 + k * 14
+                lcd.fill_rect(40, y, LCD_WIDTH - 80, 2, staff)
+            # Treble-clef-ish glyph (filled rects; readable on camera)
+            cx, cy = 90, y0 + 28
+            lcd.fill_rect(cx + 18, cy - 50, 6, 100, fg)  # vertical stem
+            lcd.fill_rect(cx + 8, cy - 50, 28, 6, fg)  # top curl
+            lcd.fill_rect(cx + 8, cy - 50, 6, 20, fg)
+            lcd.fill_rect(cx, cy - 10, 36, 6, fg)  # mid swirl
+            lcd.fill_rect(cx, cy - 10, 6, 24, fg)
+            lcd.fill_rect(cx, cy + 14, 22, 6, fg)
+            lcd.fill_rect(cx + 24, cy + 8, 12, 12, fg)  # lower ball
+            lcd.fill_rect(cx + 10, cy + 36, 14, 14, fg)  # bottom ball
+            # Title under staff
+            text = str(title or "First by Tig")
+            scale = 3
+            adv = (5 + 1) * scale
+            tw = len(text) * adv
+            tx = (LCD_WIDTH - tw) // 2
+            if tx < 8:
+                tx = 8
+            ty = y0 + 5 * 14 + 24
+            for ch in text:
+                cols = glyph(ch)
+                for col, bits in enumerate(cols):
+                    for row in range(7):
+                        if bits & (1 << row):
+                            lcd.fill_rect(
+                                tx + col * scale,
+                                ty + row * scale,
+                                scale,
+                                scale,
+                                fg,
+                            )
+                tx += adv
+            _last_face_key[0] = ("now_playing", title)
 
         def dac_idle(self) -> None:
             """Ease toward quiet without destroying DAC session (measure_dac)."""

@@ -240,29 +240,60 @@ def test_banner_motion_calls_show_banner():
     assert len(fake.face_history) == n_face or True  # init may have painted face once
 
 
-def test_middle_button_plays_and_can_stop_first_song():
-    """Button B streams First; second press path reports stopped when held."""
+def test_middle_button_play_pause_resume_no_autorepeat():
+    """Button B: start, pause (keep offset), resume; natural end does not loop."""
     main = _load("main")
     defaults = _load("defaults")
     link_mod = _load("link")
     fake = _load_sim("hal_double").FakeHal()
     link = link_mod.MemoryLink()
-    # Tiny fake song on the device path name
-    fake.binary_files[defaults.FIRST_SONG_PATH] = bytes([128, 200, 50, 128] * 20)
+    song = bytes([128, 200, 50, 128] * 50)  # 200 bytes
+    fake.binary_files[defaults.FIRST_SONG_PATH] = song
     state = main.init(hal=fake, now_ms=0, link=link, riff_data=b"")
+
+    # Start → pause after 40 bytes
+    fake.pcm_pause_after = 40
     fake.button_b = 1
     main.tick(state, now_ms=500)
-    assert defaults.FIRST_SONG_PATH in fake.pcm_plays
+    assert state["song_state"] == "paused"
+    assert state["song_offset"] == 40
     assert any("song=start" in x for x in link.out)
-    assert any(x.startswith("song=done") or x.startswith("song=stopped") for x in link.out)
-    # Mute blocks playback
+    assert any("song=paused" in x for x in link.out)
+    assert fake.last_now_playing == "First by Tig"
+    assert fake.pcm_plays[-1] == (defaults.FIRST_SONG_PATH, 0)
+
+    # Resume from 40 → run to end (no pause)
+    link.out.clear()
+    fake.pcm_pause_after = None
+    fake.button_b = 0
+    main.tick(state, now_ms=600)
+    fake.button_b = 1
+    main.tick(state, now_ms=900)
+    assert state["song_state"] == "idle"
+    assert state["song_offset"] == 0
+    assert any("song=resume" in x for x in link.out)
+    assert any("song=done" in x for x in link.out)
+    assert fake.pcm_plays[-1] == (defaults.FIRST_SONG_PATH, 40)
+
+    # Play again from start (not auto-repeat of previous)
     link.out.clear()
     fake.pcm_plays.clear()
-    main.feed_line(state, "set mute 1", now_ms=800)
     fake.button_b = 0
-    main.tick(state, now_ms=900)
+    main.tick(state, now_ms=1000)
     fake.button_b = 1
-    main.tick(state, now_ms=1200)
+    main.tick(state, now_ms=1300)
+    assert fake.pcm_plays[-1] == (defaults.FIRST_SONG_PATH, 0)
+    assert any("song=start" in x for x in link.out)
+    assert state["song_offset"] == 0
+
+    # Mute blocks
+    link.out.clear()
+    fake.pcm_plays.clear()
+    main.feed_line(state, "set mute 1", now_ms=1500)
+    fake.button_b = 0
+    main.tick(state, now_ms=1600)
+    fake.button_b = 1
+    main.tick(state, now_ms=1900)
     assert fake.pcm_plays == []
     assert any("song=muted" in x for x in link.out)
 

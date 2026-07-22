@@ -69,6 +69,9 @@ def init(hal=None, now_ms=0, link=None, riff_data=None):
         "btn_a": make_button(now_ms),
         "btn_b": make_button(now_ms),
         "song_playing": False,
+        # idle | paused — "playing" only during blocking play_pcm_file
+        "song_state": "idle",
+        "song_offset": 0,
     }
     if hal is not None and hasattr(hal, "set_backlight"):
         hal.set_backlight(True)
@@ -127,8 +130,28 @@ def _device_or_host_riff(hal):
     return load_riff_bytes()
 
 
+def _restore_face_after_song(state):
+    """Normal face when not actively playing (paused, done, error)."""
+    state["_idle_painted"] = False
+    state["_side_key"] = None
+    state["_theme_key"] = None
+    state["_banner_x"] = None
+    try:
+        _paint(state)
+    except Exception:
+        pass
+
+
 def _toggle_first_song(state):
-    """Button B: start *First* if idle; while playing, second press stops (in HAL)."""
+    """Button B: start / pause / resume *First* (no auto-repeat, no restart-on-B).
+
+    - idle: play from start
+    - playing (inside this call): B → pause, keep offset
+    - paused: resume from offset
+    - natural end: offset 0, idle, do not loop
+    Playback is intentionally blocking (face ticks pause); show now-playing
+    while audio runs, restore face when not playing.
+    """
     hal = state.get("hal")
     cfg = state.get("cfg") or {}
     if int(cfg.get("mute") or 0) == 1:
@@ -137,17 +160,31 @@ def _toggle_first_song(state):
     if hal is None or not hasattr(hal, "play_pcm_file"):
         _emit(state, "song=no_hal")
         return
-    # Park square-wave engine so DAC owns the amp.
     if hasattr(hal, "park_outputs"):
         try:
             hal.park_outputs()
         except Exception:
             pass
-    path = FIRST_SONG_PATH
-    _emit(state, "song=start path=%s" % path)
-    state["song_playing"] = True
 
-    def _stop_reader():
+    path = FIRST_SONG_PATH
+    offset = int(state.get("song_offset") or 0)
+    if state.get("song_state") != "paused":
+        offset = 0
+    # Now-playing art only while audio is actively running
+    if hasattr(hal, "show_now_playing"):
+        try:
+            hal.show_now_playing("First by Tig")
+        except Exception:
+            pass
+
+    if offset > 0:
+        _emit(state, "song=resume path=%s off=%s" % (path, offset))
+    else:
+        _emit(state, "song=start path=%s" % path)
+    state["song_playing"] = True
+    state["song_state"] = "playing"
+
+    def _pause_reader():
         if hasattr(hal, "read_button_b"):
             try:
                 return 1 if hal.read_button_b() else 0
@@ -155,19 +192,49 @@ def _toggle_first_song(state):
                 return 0
         return 0
 
+    result = "error"
+    new_off = 0
     try:
-        result = hal.play_pcm_file(path, stop_reader=_stop_reader)
+        out = hal.play_pcm_file(
+            path, stop_reader=_pause_reader, start_offset=offset
+        )
+        if isinstance(out, (tuple, list)) and len(out) >= 2:
+            result, new_off = out[0], int(out[1] or 0)
+        else:
+            # legacy string return
+            result = out if out else "error"
+            new_off = 0
     except Exception as e:
         result = "error"
+        new_off = offset
         try:
             _emit(state, "song=exc %s" % e)
         except Exception:
             pass
+
     state["song_playing"] = False
-    _emit(state, "song=%s" % (result or "done"))
-    # Re-arm button edge after a stop press that may still be held.
+    if result == "paused":
+        state["song_state"] = "paused"
+        state["song_offset"] = new_off
+        _emit(state, "song=paused off=%s" % new_off)
+    elif result == "done":
+        state["song_state"] = "idle"
+        state["song_offset"] = 0
+        _emit(state, "song=done")
+    else:
+        # error/missing — stay paused if we had progress, else idle
+        if new_off > 0:
+            state["song_state"] = "paused"
+            state["song_offset"] = new_off
+        else:
+            state["song_state"] = "idle"
+            state["song_offset"] = 0
+        _emit(state, "song=%s off=%s" % (result or "error", state["song_offset"]))
+
+    # Face when not playing (paused or finished)
+    _restore_face_after_song(state)
     if "btn_b" in state:
-        state["btn_b"]["down"] = 1 if _stop_reader() else 0
+        state["btn_b"]["down"] = 1 if _pause_reader() else 0
 
 
 def _emit(state, line):

@@ -80,22 +80,46 @@ class FakeHal:
     def write_dac_samples(self, data, fade_out=True, sample_hz=None) -> None:
         self.dac_chunks.append(bytes(data) if not isinstance(data, bytes) else data)
 
-    def play_pcm_file(self, path, stop_reader=None, sample_hz=None, chunk=None) -> str:
-        # Host double: consume file if present; honor stop_reader after "release".
-        self.pcm_plays.append(path)
+    def play_pcm_file(
+        self, path, stop_reader=None, sample_hz=None, chunk=None, start_offset=0
+    ):
+        """Host double: (outcome, offset). pcm_pause_after = bytes to play then pause."""
+        self.pcm_plays.append((path, int(start_offset or 0)))
         data = self.binary_files.get(path)
         if data is None:
-            return "missing"
-        released = False
+            return ("missing", 0)
+        start = int(start_offset or 0)
+        if start < 0:
+            start = 0
+        if start >= len(data):
+            return ("done", 0)
         if stop_reader is not None:
-            # simulate release
-            self.button_b = 0
-            released = True
-        if stop_reader is not None and released and stop_reader():
-            return "stopped"
-        self.write_dac_samples(data, fade_out=False, sample_hz=sample_hz)
+            self.button_b = 0  # release start press
+        pause_after = getattr(self, "pcm_pause_after", None)
+        if pause_after is not None:
+            played = int(pause_after)
+            if played < 0:
+                played = 0
+            end = start + played
+            if end >= len(data):
+                chunk = data[start:]
+                self.write_dac_samples(chunk, fade_out=False, sample_hz=sample_hz)
+                self.dac_idle()
+                return ("done", 0)
+            self.write_dac_samples(data[start:end], fade_out=False, sample_hz=sample_hz)
+            self.dac_idle()
+            return ("paused", end)
+        if stop_reader is not None and stop_reader():
+            return ("paused", start)
+        self.write_dac_samples(data[start:], fade_out=False, sample_hz=sample_hz)
         self.dac_idle()
-        return "done"
+        return ("done", 0)
+
+    def show_now_playing(self, title="First by Tig") -> None:
+        self.last_now_playing = title
+        if not hasattr(self, "now_playing_history"):
+            self.now_playing_history = []
+        self.now_playing_history.append(title)
 
     def write_text(self, path: str, text: str) -> None:
         self.files[path] = text
