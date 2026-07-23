@@ -1,4 +1,4 @@
-# Local part-truth cache; grounding copies, never committed.
+# Local caches and host noise (never commit).
 .silico/
 __pycache__/
 .venv/
