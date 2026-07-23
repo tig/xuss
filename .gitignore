@@ -1,0 +1,6 @@
+# Local part-truth cache; grounding copies, never committed.
+.silico/
+__pycache__/
+.venv/
+.pytest_cache/
+*.pyc
